@@ -27,6 +27,7 @@ def load_config():
     cfg = {
         "url": os.environ.get("BOX_API_URL", "http://127.0.0.1:9091"),
         "password": os.environ.get("BOX_API_SECRET", ""),
+        "showTraffic": True,
     }
     if os.path.isfile(CONFIG_FILE):
         try:
@@ -37,17 +38,26 @@ def load_config():
                         cfg["url"] = saved["url"]
                     if "password" in saved:
                         cfg["password"] = saved["password"]
+                    if "showTraffic" in saved:
+                        cfg["showTraffic"] = bool(saved["showTraffic"])
         except Exception:
             pass
     return cfg
 
 
-def save_config(url, password):
+def save_config(url=None, password=None, show_traffic=None):
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    cfg = {"url": url, "password": password}
+    cfg = load_config()
+    if url is not None:
+        cfg["url"] = url
+    if password is not None:
+        cfg["password"] = password
+    if show_traffic is not None:
+        cfg["showTraffic"] = bool(show_traffic)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     return cfg
+
 
 
 def load_cache():
@@ -419,19 +429,24 @@ def get_daemon_status(url, secret):
 
 
 def get_status(url, secret):
+    cfg = load_config()
+    show_traffic = cfg.get("showTraffic", True)
+
     # Try Clash REST first
     clash_res = get_clash_status(url, secret)
-    if clash_res["online"]:
-        return clash_res
-    if clash_res.get("status") == 401:
+    if clash_res["online"] or clash_res.get("status") == 401:
+        clash_res["showTraffic"] = show_traffic
         return clash_res
 
     # Try daemon API
     daemon_res = get_daemon_status(url, secret)
     if daemon_res["online"] or daemon_res.get("status") == 401:
+        daemon_res["showTraffic"] = show_traffic
         return daemon_res
 
-    return clash_res if clash_res.get("status") != 0 else daemon_res
+    res = clash_res if clash_res.get("status") != 0 else daemon_res
+    res["showTraffic"] = show_traffic
+    return res
 
 
 # -------------------------------------------------------------
@@ -831,7 +846,7 @@ def main():
     parser.add_argument("--password", default="", help="sing-box API password/secret")
     parser.add_argument("command", choices=[
         "status", "groups", "connections", "logs", "select", "urltest",
-        "set-mode", "close-connection", "close-connections", "save-config", "get-config"
+        "set-mode", "close-connection", "close-connections", "save-config", "get-config", "set-traffic"
     ])
     parser.add_argument("args", nargs="*", help="Additional arguments")
 
@@ -845,10 +860,20 @@ def main():
         print(json.dumps(load_config()))
         return
 
+    if parsed.command == "set-traffic":
+        val_str = parsed.args[0].lower() if len(parsed.args) > 0 else "true"
+        enabled = val_str in ("true", "1", "yes", "on")
+        saved = save_config(show_traffic=enabled)
+        print(json.dumps(saved))
+        return
+
     if parsed.command == "save-config":
         new_url = parsed.args[0] if len(parsed.args) > 0 else url
         new_pass = parsed.args[1] if len(parsed.args) > 1 else password
-        saved = save_config(new_url, new_pass)
+        show_traffic = None
+        if len(parsed.args) > 2:
+            show_traffic = parsed.args[2].lower() in ("true", "1", "yes", "on")
+        saved = save_config(new_url, new_pass, show_traffic=show_traffic)
         print(json.dumps(saved))
         return
 

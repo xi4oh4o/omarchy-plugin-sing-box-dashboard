@@ -45,6 +45,7 @@ Panel {
   property string inputUrl: parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : "http://127.0.0.1:9091"
   property string inputPassword: parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
   property bool showPassword: false
+  property bool showTrafficSetting: parentWidget ? parentWidget.showTraffic : true
   property string actionMessage: ""
 
   function isGroupExpanded(expandedMap, groupName, index) {
@@ -163,8 +164,28 @@ Panel {
   }
 
   function saveConfig(newUrl, newPass) {
-    saveProc.command = ["python3", root.scriptPath, "save-config", newUrl, newPass]
+    var trafficStr = (root.parentWidget ? root.parentWidget.showTraffic : root.showTrafficSetting) ? "true" : "false"
+    saveProc.command = ["python3", root.scriptPath, "save-config", newUrl, newPass, trafficStr]
     saveProc.running = true
+  }
+
+  function setTrafficDisplay(enabled) {
+    root.showTrafficSetting = enabled
+    if (root.parentWidget) {
+      root.parentWidget.showTraffic = enabled
+    }
+    setTrafficProc.command = ["python3", root.scriptPath, "set-traffic", enabled ? "true" : "false"]
+    setTrafficProc.running = true
+  }
+
+  Process {
+    id: setTrafficProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (root.parentWidget) root.parentWidget.refreshNow()
+      }
+    }
   }
 
   function openDashboard() {
@@ -290,7 +311,7 @@ Panel {
           spacing: Style.space(8)
 
           Text {
-            text: "󰒋"
+            text: "󰏖"
             font.family: Style.font.family
             font.pixelSize: Style.font.title * 1.15
             color: root.parentWidget && root.parentWidget.online ? "#4caf50" : (root.parentWidget && root.parentWidget.httpStatus === 401 ? "#ff9800" : "#f44336")
@@ -1704,6 +1725,30 @@ Panel {
             color: "#4caf50"
             horizontalAlignment: Text.AlignHCenter
             width: parent.width
+          }
+
+          PanelSeparator {
+            width: parent.width
+            foreground: root.foreground
+          }
+
+          PanelSectionHeader {
+            text: "BAR DISPLAY"
+            foreground: root.foreground
+          }
+
+          Toggle {
+            width: parent.width
+            label: "Display Traffic in Bar"
+            description: "Show real-time upload and download speeds on the top bar"
+            foreground: root.foreground
+            accent: Style.accent || "#38bdf8"
+            fontFamily: root.fontFamily
+            checked: root.parentWidget ? root.parentWidget.showTraffic : root.showTrafficSetting
+            onClicked: {
+              var current = root.parentWidget ? root.parentWidget.showTraffic : root.showTrafficSetting
+              root.setTrafficDisplay(!current)
+            }
           }
 
           PanelSeparator {

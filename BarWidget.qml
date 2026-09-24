@@ -39,6 +39,9 @@ BarWidget {
   property var groupsData: []
   property bool busy: false
 
+  readonly property var configuredShowTraffic: setting("showTraffic", null)
+  property bool showTraffic: configuredShowTraffic !== null ? Boolean(configuredShowTraffic) : true
+
   readonly property color foreground: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property color statusColor: online ? "#4caf50" : (httpStatus === 401 ? "#ff9800" : "#f44336")
@@ -96,6 +99,9 @@ BarWidget {
           root.httpStatus = Number(res.status) || (root.online ? 200 : 0)
           root.errorText = String(res.error || "")
           root.apiType = String(res.apiType || "daemon")
+          if (res.showTraffic !== undefined && root.configuredShowTraffic === null) {
+            root.showTraffic = res.showTraffic === true
+          }
           if (root.online) {
             root.version = String(res.version || "")
             root.currentMode = Model.normalizeMode(res.mode)
@@ -169,14 +175,18 @@ BarWidget {
   }
 
   readonly property string buttonLabel: {
-    if (root.vertical) return "󰒋"
+    if (root.vertical) return "󰏖"
+    if (!root.showTraffic) {
+      if (root.httpStatus === 401) return "󰏖  Auth Required"
+      return "󰏖"
+    }
     if (root.online) {
-      return "󰒋  ↑ " + Model.formatRate(root.uploadRate) + "  ↓ " + Model.formatRate(root.downloadRate)
+      return "󰏖  ↑ " + Model.formatRate(root.uploadRate) + "  ↓ " + Model.formatRate(root.downloadRate)
     }
     if (root.httpStatus === 401) {
-      return "󰒋  Auth Required"
+      return "󰏖  Auth Required"
     }
-    return "󰒋  sing-box"
+    return "󰏖  sing-box"
   }
 
   implicitWidth: button.implicitWidth
@@ -191,6 +201,7 @@ BarWidget {
     function show() { root.open() }
     function hide() { root.close() }
     function toggle() { root.togglePanel() }
+    function setShowTraffic(enabled) { root.showTraffic = (enabled === true || enabled === "true") }
   }
 
   WidgetButton {

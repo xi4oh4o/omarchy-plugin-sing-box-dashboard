@@ -21,7 +21,8 @@
     "defaults": {
       "url": "http://127.0.0.1:9090",
       "password": "",
-      "refreshIntervalSec": 2
+      "refreshIntervalSec": 2,
+      "showTraffic": true
     },
     "schema": [
       {
@@ -46,6 +47,13 @@
         "max": 60,
         "step": 1,
         "defaultValue": 2
+      },
+      {
+        "key": "showTraffic",
+        "type": "boolean",
+        "label": "Display traffic in bar",
+        "defaultValue": true,
+        "description": "Show real-time upload and download speeds in the bar widget"
       }
     ]
   }
