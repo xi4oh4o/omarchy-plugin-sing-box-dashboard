@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-sing-box API client helper for Omarchy plugin sing-box-dashboard.
-Supports both Clash-compatible REST API (e.g. port 9090) and sing-box daemon API (e.g. port 9091).
+sing-box 1.14 API client helper for Omarchy plugin sing-box-dashboard.
+Supports:
+  - sing-box daemon API (e.g. port 9091, via 'sing-box api')
+  - Clash-compatible REST API (e.g. port 9090, via HTTP)
+  - Full dashboard functions: Status/Overview, Groups, Connections, Logs, Mode, URLTest
 """
 
 import argparse
@@ -22,7 +25,7 @@ CACHE_FILE = os.path.join(CONFIG_DIR, "state_cache.json")
 
 def load_config():
     cfg = {
-        "url": os.environ.get("BOX_API_URL", "http://127.0.0.1:9090"),
+        "url": os.environ.get("BOX_API_URL", "http://127.0.0.1:9091"),
         "password": os.environ.get("BOX_API_SECRET", ""),
     }
     if os.path.isfile(CONFIG_FILE):
@@ -69,10 +72,27 @@ def save_cache(cache_data):
 def normalize_url(url):
     u = (url or "").strip().rstrip("/")
     if not u:
-        return "http://127.0.0.1:9090"
+        return "http://127.0.0.1:9091"
     if not u.startswith("http://") and not u.startswith("https://"):
         return f"http://{u}"
     return u
+
+
+def parse_bytes_unit(val_str, unit_str):
+    try:
+        val = float(val_str)
+        u = (unit_str or "").strip().upper()
+        if "T" in u:
+            return int(val * 1024 * 1024 * 1024 * 1024)
+        elif "G" in u:
+            return int(val * 1024 * 1024 * 1024)
+        elif "M" in u:
+            return int(val * 1024 * 1024)
+        elif "K" in u:
+            return int(val * 1024)
+        return int(val)
+    except Exception:
+        return 0
 
 
 def http_request(url, path, secret, method="GET", body=None, timeout=3):
@@ -110,25 +130,29 @@ def http_request(url, path, secret, method="GET", body=None, timeout=3):
         return {"ok": False, "status": 0, "error": str(e)}
 
 
+# -------------------------------------------------------------
+# Clash REST API Adapter
+# -------------------------------------------------------------
+
 def get_clash_status(url, secret):
-    # Check version
     ver_res = http_request(url, "/version", secret, timeout=2)
-    if not ver_res["ok"]:
+    # Must be valid json object containing "version"
+    if not ver_res["ok"] or not isinstance(ver_res.get("data"), dict) or "version" not in ver_res["data"]:
         return {
             "online": False,
-            "error": ver_res.get("error", "Failed to reach sing-box API"),
+            "error": ver_res.get("error", "Not a Clash REST API"),
             "status": ver_res.get("status", 0),
         }
 
-    version = ""
-    if isinstance(ver_res.get("data"), dict):
-        version = ver_res["data"].get("version", "")
+    version = ver_res["data"].get("version", "")
 
     # Configs / mode
-    mode = "rule"
+    mode = "Rule"
+    mode_list = ["Rule", "Global", "Direct"]
     cfg_res = http_request(url, "/configs", secret, timeout=2)
     if cfg_res["ok"] and isinstance(cfg_res.get("data"), dict):
-        mode = cfg_res["data"].get("mode", "rule").lower()
+        raw_mode = cfg_res["data"].get("mode", "Rule")
+        mode = raw_mode.capitalize() if raw_mode else "Rule"
 
     # Connections & traffic totals
     conn_res = http_request(url, "/connections", secret, timeout=2)
@@ -157,9 +181,8 @@ def get_clash_status(url, secret):
     groups = []
     active_node = ""
     prox_res = http_request(url, "/proxies", secret, timeout=2)
-    if prox_res["ok"] and isinstance(prox_res.get("data"), dict):
+    if prox_res["ok"] and isinstance(prox_res.get("data"), dict) and "proxies" in prox_res["data"]:
         all_proxies = prox_res["data"].get("proxies", {})
-        # Find selector groups
         for name, p in all_proxies.items():
             ptype = p.get("type", "")
             if ptype in ("Selector", "URLTest", "Fallback", "LoadBalance"):
@@ -188,18 +211,24 @@ def get_clash_status(url, secret):
         "apiType": "clash",
         "version": version,
         "mode": mode,
+        "modeList": mode_list,
         "activeNode": active_node,
         "uploadRate": up_rate,
         "downloadRate": down_rate,
         "uploadTotal": upload_total,
         "downloadTotal": download_total,
         "connectionsCount": conn_count,
+        "memory": 0,
+        "goroutines": 0,
         "groups": groups,
     }
 
 
+# -------------------------------------------------------------
+# sing-box 1.14 Daemon CLI Adapter
+# -------------------------------------------------------------
+
 def get_daemon_status(url, secret):
-    # Try using `sing-box api` CLI if available
     try:
         proc = subprocess.run(
             ["sing-box", "api", "version", "--url", url, "--secret", secret],
@@ -212,7 +241,7 @@ def get_daemon_status(url, secret):
             return {"online": False, "error": err, "status": 401 if "authorization" in err.lower() else 500}
         version = proc.stdout.strip()
 
-        # Get status
+        # Status output
         status_proc = subprocess.run(
             ["sing-box", "api", "status", "--url", url, "--secret", secret],
             capture_output=True,
@@ -226,8 +255,66 @@ def get_daemon_status(url, secret):
         upload_total = 0
         download_total = 0
         conn_count = 0
+        memory_bytes = 0
+        goroutines = 0
 
-        # Parse groups
+        # Memory: 133 MB
+        mem_m = re.search(r"Memory:\s*([0-9.]+)\s*([A-Za-z]+)", stat_out)
+        if mem_m:
+            memory_bytes = parse_bytes_unit(mem_m.group(1), mem_m.group(2))
+
+        # Goroutines: 196
+        gor_m = re.search(r"Goroutines:\s*([0-9]+)", stat_out)
+        if gor_m:
+            goroutines = int(gor_m.group(1))
+
+        # Connections: 19 in / 29 out
+        conn_m = re.search(r"Connections:\s*([0-9]+)\s*in\s*/\s*([0-9]+)\s*out", stat_out)
+        if conn_m:
+            conn_count = int(conn_m.group(2))
+        else:
+            conn_single = re.search(r"Connections(?:\s*Out)?:\s*([0-9]+)", stat_out)
+            if conn_single:
+                conn_count = int(conn_single.group(1))
+
+        # Uplink: 1.7 kB/s (127 MB total)
+        up_m = re.search(r"Uplink:\s*([0-9.]+)\s*([A-Za-z/]+)(?:\s*\(([0-9.]+)\s*([A-Za-z]+)\s*total\))?", stat_out)
+        if up_m:
+            upload_rate = parse_bytes_unit(up_m.group(1), up_m.group(2).replace("/s", ""))
+            if up_m.group(3) and up_m.group(4):
+                upload_total = parse_bytes_unit(up_m.group(3), up_m.group(4))
+
+        # Downlink: 8.0 kB/s (1.4 GB total)
+        down_m = re.search(r"Downlink:\s*([0-9.]+)\s*([A-Za-z/]+)(?:\s*\(([0-9.]+)\s*([A-Za-z]+)\s*total\))?", stat_out)
+        if down_m:
+            download_rate = parse_bytes_unit(down_m.group(1), down_m.group(2).replace("/s", ""))
+            if down_m.group(3) and down_m.group(4):
+                download_total = parse_bytes_unit(down_m.group(3), down_m.group(4))
+
+        # Mode
+        mode = "Rule"
+        mode_proc = subprocess.run(
+            ["sing-box", "api", "mode", "--url", url, "--secret", secret],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if mode_proc.returncode == 0 and mode_proc.stdout.strip():
+            mode = mode_proc.stdout.strip().capitalize()
+
+        mode_list = ["Rule", "Global", "Direct"]
+        mlist_proc = subprocess.run(
+            ["sing-box", "api", "mode", "list", "--url", url, "--secret", secret],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if mlist_proc.returncode == 0 and mlist_proc.stdout.strip():
+            lines = [l.strip().capitalize() for l in mlist_proc.stdout.splitlines() if l.strip()]
+            if lines:
+                mode_list = lines
+
+        # Groups
         grp_proc = subprocess.run(
             ["sing-box", "api", "group", "list", "--url", url, "--secret", secret],
             capture_output=True,
@@ -238,27 +325,55 @@ def get_daemon_status(url, secret):
         active_node = ""
         for line in grp_proc.stdout.splitlines():
             line = line.strip()
-            if not line:
+            if not line or line.startswith("TAG"):
                 continue
             parts = line.split()
             if len(parts) >= 2:
                 gtag = parts[0]
-                gsel = parts[1] if len(parts) > 1 else ""
-                groups.append({"name": gtag, "type": "Selector", "selected": gsel, "items": []})
-                if not active_node:
+                gtype = parts[1].capitalize()
+                gsel = parts[2] if len(parts) > 2 else ""
+
+                # Show items for group
+                items = []
+                show_proc = subprocess.run(
+                    ["sing-box", "api", "group", "show", gtag, "--url", url, "--secret", secret],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                if show_proc.returncode == 0:
+                    for sline in show_proc.stdout.splitlines():
+                        sline = sline.strip()
+                        if not sline or sline.startswith("Tag:") or sline.startswith("Type:") or sline.startswith("Selected:") or sline.startswith("TAG"):
+                            continue
+                        sparts = sline.split()
+                        if len(sparts) >= 2:
+                            itag = sparts[0]
+                            itype = sparts[1]
+                            delay = 0
+                            dm = re.search(r"([0-9]+)\s*ms", sline)
+                            if dm:
+                                delay = int(dm.group(1))
+                            items.append({"name": itag, "type": itype, "delay": delay})
+
+                groups.append({"name": gtag, "type": gtype, "selected": gsel, "items": items})
+                if not active_node and gsel:
                     active_node = gsel
 
         return {
             "online": True,
             "apiType": "daemon",
             "version": version,
-            "mode": "rule",
+            "mode": mode,
+            "modeList": mode_list,
             "activeNode": active_node,
             "uploadRate": upload_rate,
             "downloadRate": download_rate,
             "uploadTotal": upload_total,
             "downloadTotal": download_total,
             "connectionsCount": conn_count,
+            "memory": memory_bytes,
+            "goroutines": goroutines,
             "groups": groups,
         }
     except Exception as e:
@@ -266,15 +381,245 @@ def get_daemon_status(url, secret):
 
 
 def get_status(url, secret):
-    res = get_clash_status(url, secret)
-    if res["online"] or res.get("status") == 401:
-        return res
-    # If Clash API gave 404 or connection error, check daemon API
-    d_res = get_daemon_status(url, secret)
-    if d_res["online"] or d_res.get("status") == 401:
-        return d_res
-    return res
+    # Try Clash REST first
+    clash_res = get_clash_status(url, secret)
+    if clash_res["online"]:
+        return clash_res
+    if clash_res.get("status") == 401:
+        return clash_res
 
+    # Try daemon API
+    daemon_res = get_daemon_status(url, secret)
+    if daemon_res["online"] or daemon_res.get("status") == 401:
+        return daemon_res
+
+    return clash_res if clash_res.get("status") != 0 else daemon_res
+
+
+# -------------------------------------------------------------
+# Groups / Proxies
+# -------------------------------------------------------------
+
+def get_groups(url, secret):
+    # Try Clash API
+    prox_res = http_request(url, "/proxies", secret, timeout=3)
+    if prox_res["ok"] and isinstance(prox_res.get("data"), dict) and "proxies" in prox_res["data"]:
+        all_proxies = prox_res["data"].get("proxies", {})
+        groups = []
+        for name, p in all_proxies.items():
+            ptype = p.get("type", "")
+            if ptype in ("Selector", "URLTest", "Fallback", "LoadBalance"):
+                selected = p.get("now", "")
+                items = []
+                for item_name in p.get("all", []):
+                    item_info = all_proxies.get(item_name, {})
+                    history = item_info.get("history", [])
+                    delay = history[-1].get("delay", 0) if history else 0
+                    items.append({
+                        "name": item_name,
+                        "type": item_info.get("type", "Proxy"),
+                        "delay": delay,
+                    })
+                groups.append({
+                    "name": name,
+                    "type": ptype,
+                    "selected": selected,
+                    "items": items,
+                })
+        return {"online": True, "groups": groups}
+
+    # Fallback to daemon CLI
+    try:
+        grp_proc = subprocess.run(
+            ["sing-box", "api", "group", "list", "--url", url, "--secret", secret],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if grp_proc.returncode != 0:
+            return {"online": False, "error": grp_proc.stderr.strip() or "Failed to list groups"}
+        groups = []
+        for line in grp_proc.stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith("TAG"):
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                gtag = parts[0]
+                gtype = parts[1].capitalize()
+                gsel = parts[2] if len(parts) > 2 else ""
+                items = []
+                show_proc = subprocess.run(
+                    ["sing-box", "api", "group", "show", gtag, "--url", url, "--secret", secret],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                if show_proc.returncode == 0:
+                    for sline in show_proc.stdout.splitlines():
+                        sline = sline.strip()
+                        if not sline or sline.startswith("Tag:") or sline.startswith("Type:") or sline.startswith("Selected:") or sline.startswith("TAG"):
+                            continue
+                        sparts = sline.split()
+                        if len(sparts) >= 2:
+                            itag = sparts[0]
+                            itype = sparts[1]
+                            delay = 0
+                            dm = re.search(r"([0-9]+)\s*ms", sline)
+                            if dm:
+                                delay = int(dm.group(1))
+                            items.append({"name": itag, "type": itype, "delay": delay})
+                groups.append({"name": gtag, "type": gtype, "selected": gsel, "items": items})
+        return {"online": True, "groups": groups}
+    except Exception as e:
+        return {"online": False, "error": str(e)}
+
+
+# -------------------------------------------------------------
+# Connections
+# -------------------------------------------------------------
+
+def get_connections(url, secret):
+    # Try Clash API
+    res = http_request(url, "/connections", secret, timeout=3)
+    if res["ok"] and isinstance(res.get("data"), dict) and "connections" in res["data"]:
+        raw_conns = res["data"].get("connections", [])
+        conn_list = []
+        for c in raw_conns[:100]:
+            meta = c.get("metadata", {})
+            host = meta.get("host") or meta.get("destinationIP", "")
+            port = meta.get("destinationPort", "")
+            dest = f"{host}:{port}" if port and str(port) not in host else host
+            network = meta.get("network", "tcp").upper()
+            rule = c.get("rule", "")
+            chains = c.get("chains", [])
+            outbound = chains[0] if chains else ""
+            conn_list.append({
+                "id": c.get("id", ""),
+                "host": host,
+                "destination": dest,
+                "network": network,
+                "source": f"{meta.get('sourceIP', '')}:{meta.get('sourcePort', '')}",
+                "inbound": meta.get("type", "inbound"),
+                "outbound": outbound,
+                "rule": rule,
+                "upload": c.get("upload", 0),
+                "download": c.get("download", 0),
+                "curUploadRate": c.get("curUploadRate", 0),
+                "curDownloadRate": c.get("curDownloadRate", 0),
+                "start": c.get("start", ""),
+            })
+        return {
+            "online": True,
+            "connections": conn_list,
+            "totalCount": len(raw_conns),
+            "uploadTotal": res["data"].get("uploadTotal", 0),
+            "downloadTotal": res["data"].get("downloadTotal", 0),
+        }
+
+    # Fallback to daemon CLI
+    try:
+        proc = subprocess.run(
+            ["sing-box", "api", "connection", "list", "--columns", "id,network,destination,inbound,outbound,total,rule", "--url", url, "--secret", secret],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if proc.returncode != 0:
+            return {"online": False, "error": proc.stderr.strip() or "Failed to list connections"}
+        conn_list = []
+        pattern = re.compile(r"^([0-9a-fA-F\-]{36})\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(↑\S+\s+[A-Za-z/]+\s+↓\S+\s+[A-Za-z/]+)\s*(.*)$")
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            m = pattern.match(line)
+            if not m:
+                continue
+            cid = m.group(1)
+            cnet = m.group(2).upper()
+            cdest = m.group(3)
+            cin = m.group(4)
+            cout = m.group(5)
+            ctot = m.group(6)
+            crule = m.group(7).strip()
+            if crule == "-":
+                crule = ""
+
+            chost = cdest.split(":")[0] if ":" in cdest else cdest
+
+            # Parse upload & download from total: ↑12 kB ↓17 kB
+            up_bytes = 0
+            down_bytes = 0
+            tot_m = re.search(r"↑([0-9.]+)\s*([A-Za-z]+)\s*↓([0-9.]+)\s*([A-Za-z]+)", ctot)
+            if tot_m:
+                up_bytes = parse_bytes_unit(tot_m.group(1), tot_m.group(2))
+                down_bytes = parse_bytes_unit(tot_m.group(3), tot_m.group(4))
+
+            conn_list.append({
+                "id": cid,
+                "host": chost,
+                "destination": cdest,
+                "network": cnet,
+                "source": "",
+                "inbound": cin,
+                "outbound": cout,
+                "rule": crule,
+                "upload": up_bytes,
+                "download": down_bytes,
+                "totalText": ctot,
+                "start": "",
+            })
+        return {"online": True, "connections": conn_list[:100], "totalCount": len(conn_list)}
+    except Exception as e:
+        return {"online": False, "error": str(e)}
+
+
+# -------------------------------------------------------------
+# Logs
+# -------------------------------------------------------------
+
+def get_logs(url, secret, level="info", search=""):
+    try:
+        cmd = ["sing-box", "api", "logs", "--url", url, "--secret", secret]
+        if level:
+            cmd.extend(["--level", level])
+        if search:
+            cmd.extend(["--search", search])
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        if proc.returncode == 0:
+            entries = []
+            for line in proc.stdout.splitlines()[-80:]:
+                line = line.strip()
+                if not line:
+                    continue
+                # Line format: INFO[5588] dns: refreshed ...
+                m = re.match(r"^([A-Z]+)\[([0-9]+)\]\s*(.*)$", line)
+                if m:
+                    entries.append({
+                        "level": m.group(1).lower(),
+                        "seq": m.group(2),
+                        "message": m.group(3),
+                    })
+                else:
+                    lvl = "info"
+                    if "ERROR" in line or "[Error]" in line:
+                        lvl = "error"
+                    elif "WARN" in line or "[Warn]" in line:
+                        lvl = "warn"
+                    elif "DEBUG" in line or "[Debug]" in line:
+                        lvl = "debug"
+                    elif "TRACE" in line or "[Trace]" in line:
+                        lvl = "trace"
+                    entries.append({"level": lvl, "seq": "", "message": line})
+            return {"online": True, "logs": entries}
+    except Exception:
+        pass
+
+    return {"online": True, "logs": []}
+
+
+# -------------------------------------------------------------
+# Actions
+# -------------------------------------------------------------
 
 def select_outbound(url, secret, group, node):
     res = http_request(
@@ -286,7 +631,6 @@ def select_outbound(url, secret, group, node):
     )
     if res["ok"]:
         return {"success": True}
-    # Try daemon api CLI
     try:
         proc = subprocess.run(
             ["sing-box", "api", "group", "select", group, node, "--url", url, "--secret", secret],
@@ -301,25 +645,40 @@ def select_outbound(url, secret, group, node):
         return {"success": False, "error": str(e)}
 
 
-def urltest(url, secret, node):
-    res = http_request(
-        url,
-        f"/proxies/{urllib.parse.quote(node)}/delay?url=http://www.gstatic.com/generate_204&timeout=3000",
-        secret,
-    )
-    if res["ok"] and isinstance(res.get("data"), dict):
-        return {"success": True, "delay": res["data"].get("delay", 0)}
-    # Try daemon api CLI
-    try:
-        proc = subprocess.run(
-            ["sing-box", "api", "group", "urltest", node, "--url", url, "--secret", secret],
-            capture_output=True,
-            text=True,
-            timeout=5,
+def urltest(url, secret, target=""):
+    if target:
+        res = http_request(
+            url,
+            f"/proxies/{urllib.parse.quote(target)}/delay?url=http://www.gstatic.com/generate_204&timeout=3000",
+            secret,
         )
-        if proc.returncode == 0:
-            return {"success": True, "output": proc.stdout.strip()}
-        return {"success": False, "error": proc.stderr.strip() or res.get("error")}
+        if res["ok"] and isinstance(res.get("data"), dict):
+            return {"success": True, "delay": res["data"].get("delay", 0)}
+    try:
+        # If target specified, test group
+        if target:
+            proc = subprocess.run(
+                ["sing-box", "api", "group", "urltest", target, "--url", url, "--secret", secret],
+                capture_output=True,
+                text=True,
+                timeout=6,
+            )
+            if proc.returncode == 0:
+                return {"success": True, "output": proc.stdout.strip()}
+            return {"success": False, "error": proc.stderr.strip()}
+
+        # If no target specified, test all groups
+        g_res = get_groups(url, secret)
+        if g_res.get("online") and g_res.get("groups"):
+            for g in g_res["groups"]:
+                subprocess.run(
+                    ["sing-box", "api", "group", "urltest", g["name"], "--url", url, "--secret", secret],
+                    capture_output=True,
+                    text=True,
+                    timeout=4,
+                )
+            return {"success": True}
+        return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -330,13 +689,31 @@ def set_mode(url, secret, mode):
         return {"success": True, "mode": mode}
     try:
         proc = subprocess.run(
-            ["sing-box", "api", "mode", mode.lower(), "--url", url, "--secret", secret],
+            ["sing-box", "api", "mode", "set", mode.lower(), "--url", url, "--secret", secret],
             capture_output=True,
             text=True,
             timeout=3,
         )
         if proc.returncode == 0:
             return {"success": True, "mode": mode}
+        return {"success": False, "error": proc.stderr.strip() or res.get("error")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def close_connection(url, secret, conn_id):
+    res = http_request(url, f"/connections/{conn_id}", secret, method="DELETE")
+    if res["ok"]:
+        return {"success": True}
+    try:
+        proc = subprocess.run(
+            ["sing-box", "api", "connection", "close", conn_id, "--url", url, "--secret", secret],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if proc.returncode == 0:
+            return {"success": True}
         return {"success": False, "error": proc.stderr.strip() or res.get("error")}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -364,48 +741,59 @@ def main():
     parser = argparse.ArgumentParser(description="sing-box API helper")
     parser.add_argument("--url", default="", help="sing-box API URL")
     parser.add_argument("--password", default="", help="sing-box API password/secret")
-    parser.add_argument("command", choices=["status", "select", "urltest", "set-mode", "close-connections", "save-config", "get-config"])
+    parser.add_argument("command", choices=[
+        "status", "groups", "connections", "logs", "select", "urltest",
+        "set-mode", "close-connection", "close-connections", "save-config", "get-config"
+    ])
     parser.add_argument("args", nargs="*", help="Additional arguments")
 
     parsed = parser.parse_args()
-    cfg = load_config()
 
-    url = parsed.url or cfg.get("url", "http://127.0.0.1:9090")
-    password = parsed.password if parsed.password != "" else cfg.get("password", "")
+    cfg = load_config()
+    url = parsed.url or cfg["url"]
+    password = parsed.password if parsed.password != "" else cfg["password"]
 
     if parsed.command == "get-config":
-        print(json.dumps(cfg))
+        print(json.dumps(load_config()))
         return
 
     if parsed.command == "save-config":
         new_url = parsed.args[0] if len(parsed.args) > 0 else url
         new_pass = parsed.args[1] if len(parsed.args) > 1 else password
         saved = save_config(new_url, new_pass)
-        print(json.dumps({"success": True, "config": saved}))
+        print(json.dumps(saved))
         return
 
     if parsed.command == "status":
-        res = get_status(url, password)
-        print(json.dumps(res))
+        print(json.dumps(get_status(url, password)))
+    elif parsed.command == "groups":
+        print(json.dumps(get_groups(url, password)))
+    elif parsed.command == "connections":
+        print(json.dumps(get_connections(url, password)))
+    elif parsed.command == "logs":
+        lvl = parsed.args[0] if len(parsed.args) > 0 else "info"
+        search = parsed.args[1] if len(parsed.args) > 1 else ""
+        print(json.dumps(get_logs(url, password, lvl, search)))
     elif parsed.command == "select":
         if len(parsed.args) < 2:
             print(json.dumps({"success": False, "error": "Usage: select <group> <node>"}))
             sys.exit(1)
-        res = select_outbound(url, password, parsed.args[0], parsed.args[1])
-        print(json.dumps(res))
+        print(json.dumps(select_outbound(url, password, parsed.args[0], parsed.args[1])))
     elif parsed.command == "urltest":
-        node = parsed.args[0] if parsed.args else ""
-        res = urltest(url, password, node)
-        print(json.dumps(res))
+        target = parsed.args[0] if parsed.args else ""
+        print(json.dumps(urltest(url, password, target)))
     elif parsed.command == "set-mode":
         if not parsed.args:
             print(json.dumps({"success": False, "error": "Usage: set-mode <rule|global|direct>"}))
             sys.exit(1)
-        res = set_mode(url, password, parsed.args[0])
-        print(json.dumps(res))
+        print(json.dumps(set_mode(url, password, parsed.args[0])))
+    elif parsed.command == "close-connection":
+        if not parsed.args:
+            print(json.dumps({"success": False, "error": "Usage: close-connection <id>"}))
+            sys.exit(1)
+        print(json.dumps(close_connection(url, password, parsed.args[0])))
     elif parsed.command == "close-connections":
-        res = close_connections(url, password)
-        print(json.dumps(res))
+        print(json.dumps(close_connections(url, password)))
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ BarWidget {
   id: root
   moduleName: "sing-box-dashboard"
 
-  readonly property string configuredUrl: String(setting("url", "http://127.0.0.1:9090"))
+  readonly property string configuredUrl: String(setting("url", ""))
   readonly property string configuredPassword: String(setting("password", ""))
   readonly property int configuredInterval: Math.max(1, Number(setting("refreshIntervalSec", 2)))
 
@@ -19,14 +19,18 @@ BarWidget {
   property bool online: false
   property string errorText: ""
   property int httpStatus: 0
-  property string apiType: "clash"
+  property string apiType: "daemon"
+  property string version: ""
   property string activeNode: ""
   property string currentMode: "Rule"
+  property var modeList: ["Rule", "Direct", "Global"]
   property real uploadRate: 0
   property real downloadRate: 0
   property real uploadTotal: 0
   property real downloadTotal: 0
   property int connCount: 0
+  property real memory: 0
+  property int goroutines: 0
   property var groupsData: []
   property bool busy: false
 
@@ -80,15 +84,19 @@ BarWidget {
           root.online = res.online === true
           root.httpStatus = Number(res.status) || (root.online ? 200 : 0)
           root.errorText = String(res.error || "")
-          root.apiType = String(res.apiType || "clash")
+          root.apiType = String(res.apiType || "daemon")
           if (root.online) {
+            root.version = String(res.version || "")
             root.currentMode = Model.normalizeMode(res.mode)
+            root.modeList = res.modeList || ["Rule", "Direct", "Global"]
             root.activeNode = String(res.activeNode || "")
             root.uploadRate = Number(res.uploadRate) || 0
             root.downloadRate = Number(res.downloadRate) || 0
             root.uploadTotal = Number(res.uploadTotal) || 0
             root.downloadTotal = Number(res.downloadTotal) || 0
             root.connCount = Number(res.connectionsCount) || 0
+            root.memory = Number(res.memory) || 0
+            root.goroutines = Number(res.goroutines) || 0
             root.groupsData = res.groups || []
           }
         } catch (e) {
