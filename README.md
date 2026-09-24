@@ -4,6 +4,16 @@ A native [Omarchy](https://omarchy.org/) status bar widget and full-featured con
 
 Built following the official sing-box dashboard design language and Omarchy shell plugin standards.
 
+<img width="873" height="808" alt="screenshot-2026-09-24_15-59-22" src="https://github.com/user-attachments/assets/adce406f-2c74-418a-93dd-9d6fe428631d" />
+
+<img width="875" height="696" alt="screenshot-2026-09-24_16-00-27" src="https://github.com/user-attachments/assets/f139d356-04af-4b12-a994-0c60d9a50955" />
+
+<img width="870" height="979" alt="screenshot-2026-09-24_15-59-36" src="https://github.com/user-attachments/assets/bfadb70a-6754-4760-ae9a-de22ebb58de8" />
+<img width="875" height="1081" alt="screenshot-2026-09-24_16-01-41" src="https://github.com/user-attachments/assets/f9872608-98d0-498a-a34a-f8fddae74ae9" />
+
+<img width="870" height="929" alt="screenshot-2026-09-24_16-00-12" src="https://github.com/user-attachments/assets/67f1dfc9-1ff7-46d5-aea8-dbc0e6b3fa48" />
+
+
 ## Features
 
 - **Live Status Bar Monitoring**:
