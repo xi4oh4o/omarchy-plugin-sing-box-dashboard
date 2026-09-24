@@ -38,11 +38,9 @@ Panel {
     if (parentWidget) {
       inputUrl = parentWidget.effectiveUrl || "http://127.0.0.1:9091"
       inputPassword = parentWidget.effectivePassword || ""
-      if (!parentWidget.online) {
-        currentTab = "settings"
-      }
       parentWidget.refreshNow()
     }
+    currentTab = "overview"
     fetchConnections()
     root.controller.show()
   }
@@ -199,7 +197,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(480))
+    contentWidth: panel.fittedContentWidth(Style.space(500))
     contentHeight: panel.fittedContentHeight(contentCol.implicitHeight + Style.space(24))
 
     PanelKeyCatcher {
@@ -211,10 +209,10 @@ Panel {
       Column {
         id: contentCol
         width: parent.width
-        spacing: Style.space(10)
+        spacing: Style.space(12)
 
         // -----------------------------------------------------------
-        // Header
+        // Top Bar: Title & Navigation Tabs
         // -----------------------------------------------------------
         RowLayout {
           width: parent.width
@@ -223,59 +221,23 @@ Panel {
           Text {
             text: "󰒋"
             font.family: Style.font.family
-            font.pixelSize: Style.font.title * 1.2
+            font.pixelSize: Style.font.title * 1.15
             color: root.parentWidget && root.parentWidget.online ? "#4caf50" : (root.parentWidget && root.parentWidget.httpStatus === 401 ? "#ff9800" : "#f44336")
           }
 
-          ColumnLayout {
-            spacing: Style.space(2)
+          Text {
+            text: "Overview"
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+            color: root.foreground
             Layout.fillWidth: true
-
-            RowLayout {
-              spacing: Style.space(6)
-
-              Text {
-                text: "sing-box"
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.title
-                font.bold: true
-                color: root.foreground
-              }
-
-              // Version Pill
-              BorderSurface {
-                visible: root.parentWidget && Boolean(root.parentWidget.version)
-                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-                radius: Style.cornerRadius
-                leftPadding: Style.space(5)
-                rightPadding: Style.space(5)
-                topPadding: Style.space(1)
-                bottomPadding: Style.space(1)
-
-                Text {
-                  anchors.centerIn: parent
-                  text: root.parentWidget ? ("v" + root.parentWidget.version) : ""
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption * 0.9
-                  color: root.dim
-                }
-              }
-            }
-
-            Text {
-              text: root.parentWidget && root.parentWidget.online
-                ? ("Online (" + root.parentWidget.apiType + ") • Mode: " + root.parentWidget.currentMode)
-                : (root.parentWidget && root.parentWidget.httpStatus === 401 ? "Unauthorized (check password)" : "Disconnected")
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              color: root.parentWidget && root.parentWidget.online ? "#4caf50" : (root.parentWidget && root.parentWidget.httpStatus === 401 ? "#ff9800" : "#f44336")
-            }
           }
 
           // Test Speed Action
           Button {
             iconText: "󰓅"
-            tooltipText: "Test delay on all outbound groups"
+            tooltipText: "Test latency on groups"
             onClicked: root.testAll()
           }
 
@@ -290,11 +252,17 @@ Panel {
               if (root.currentTab === "logs") root.fetchLogs()
             }
           }
+
+          // Settings shortcut button (tune icon matching screenshot top-right)
+          Button {
+            iconText: "󰒓"
+            tooltipText: "Configure API settings"
+            selected: root.currentTab === "settings"
+            onClicked: root.currentTab = (root.currentTab === "settings" ? "overview" : "settings")
+          }
         }
 
-        // -----------------------------------------------------------
-        // Navigation Tabs Bar
-        // -----------------------------------------------------------
+        // Navigation Tabs Row
         RowLayout {
           width: parent.width
           spacing: Style.space(4)
@@ -343,15 +311,6 @@ Panel {
               root.fetchLogs()
             }
           }
-
-          Button {
-            text: "Settings"
-            iconText: "󰒓"
-            selected: root.currentTab === "settings"
-            bordered: true
-            Layout.fillWidth: true
-            onClicked: root.currentTab = "settings"
-          }
         }
 
         PanelSeparator {
@@ -360,64 +319,67 @@ Panel {
         }
 
         // -----------------------------------------------------------
-        // TAB 1: OVERVIEW (Modeled precisely after official sing-box-dashboard)
+        // TAB 1: OVERVIEW (EXACTLY MATCHING OFFICIAL sing-box-dashboard)
         // -----------------------------------------------------------
         Column {
+          id: overviewTabCol
           width: parent.width
           spacing: Style.space(12)
           visible: root.currentTab === "overview"
 
-          // 2x2 Grid of Dashboard Cards (Upload, Download, Status, Connections)
+          // 2x2 Grid of Cards: Upload, Download, Status, Connections
           Grid {
+            id: cardsGrid
             columns: 2
-            spacing: Style.space(10)
+            spacing: Style.space(12)
             width: parent.width
 
-            // 1. Upload Traffic Card
+            // -------------------------------------------------------
+            // CARD 1: UPLOAD TRAFFIC
+            // -------------------------------------------------------
             BorderSurface {
-              width: (parent.width - Style.space(10)) / 2
+              id: uploadCard
+              width: (parent.width - Style.space(12)) / 2
+              implicitHeight: uploadCol.implicitHeight + Style.space(24)
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-              radius: Style.cornerRadius
-              leftPadding: Style.space(12)
-              rightPadding: Style.space(12)
-              topPadding: Style.space(10)
-              bottomPadding: Style.space(10)
+              radius: Style.space(12)
+              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
 
-              ColumnLayout {
-                anchors.fill: parent
-                spacing: Style.space(2)
+              Column {
+                id: uploadCol
+                x: Style.space(14)
+                y: Style.space(12)
+                width: parent.width - Style.space(28)
+                spacing: Style.space(4)
 
-                // Card Header
-                RowLayout {
+                // Header
+                Row {
                   spacing: Style.space(6)
-                  Layout.fillWidth: true
-
                   Text {
                     text: "󰕒"
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption * 1.1
                     color: root.dim
                   }
-
                   Text {
                     text: "Upload"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
-                    color: root.dim
+                    color: root.foreground
                   }
                 }
 
-                // Metric text
+                // Primary Metric
                 Text {
                   text: (root.parentWidget ? Model.formatBytes(root.parentWidget.uploadRate) : "0 B") + "/s"
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.title * 1.15
+                  font.pixelSize: Style.space(24)
                   font.bold: true
                   color: root.foreground
                 }
 
-                // Metric subtext
+                // Subtitle Metric
                 Text {
                   text: root.parentWidget ? Model.formatBytes(root.parentWidget.uploadTotal) : "0 B"
                   font.family: root.fontFamily
@@ -425,16 +387,18 @@ Panel {
                   color: root.dim
                 }
 
-                Item { height: Style.space(4) }
+                Item { width: 1; height: Style.space(4) }
 
-                // Sparkline Graph
+                // Sparkline
                 Canvas {
                   id: uploadSparkline
-                  Layout.fillWidth: true
-                  height: Style.space(40)
+                  width: parent.width
+                  height: Style.space(46)
 
                   property var history: root.parentWidget ? root.parentWidget.uplinkHistory : []
                   onHistoryChanged: requestPaint()
+                  onWidthChanged: requestPaint()
+                  Component.onCompleted: requestPaint()
 
                   onPaint: {
                     var ctx = getContext("2d")
@@ -442,7 +406,17 @@ Panel {
                     var w = width
                     var h = height
                     var pts = history || []
-                    if (pts.length < 2 || w <= 0 || h <= 0) return
+                    if (w <= 0 || h <= 0) return
+
+                    if (pts.length < 2) {
+                      ctx.beginPath()
+                      ctx.moveTo(0, h - 3)
+                      ctx.lineTo(w, h - 3)
+                      ctx.strokeStyle = "#0084ff"
+                      ctx.lineWidth = 2.0
+                      ctx.stroke()
+                      return
+                    }
 
                     var maxVal = 1
                     for (var i = 0; i < pts.length; i++) {
@@ -457,24 +431,24 @@ Panel {
                     ctx.moveTo(0, h)
                     for (var j = 0; j < pts.length; j++) {
                       var x = j * step
-                      var y = h - 2 - (pts[j] / maxVal) * (h - 6)
+                      var y = h - 3 - (pts[j] / maxVal) * (h - 8)
                       ctx.lineTo(x, y)
                     }
                     ctx.lineTo((pts.length - 1) * step, h)
                     ctx.closePath()
-                    ctx.fillStyle = Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.12)
+                    ctx.fillStyle = "rgba(0, 132, 255, 0.15)"
                     ctx.fill()
 
                     // Stroke polyline
                     ctx.beginPath()
                     for (var k = 0; k < pts.length; k++) {
                       var px = k * step
-                      var py = h - 2 - (pts[k] / maxVal) * (h - 6)
+                      var py = h - 3 - (pts[k] / maxVal) * (h - 8)
                       if (k === 0) ctx.moveTo(px, py)
                       else ctx.lineTo(px, py)
                     }
-                    ctx.strokeStyle = Color.accent
-                    ctx.lineWidth = 1.8
+                    ctx.strokeStyle = "#0084ff"
+                    ctx.lineWidth = 2.0
                     ctx.lineJoin = "round"
                     ctx.lineCap = "round"
                     ctx.stroke()
@@ -483,51 +457,52 @@ Panel {
               }
             }
 
-            // 2. Download Traffic Card
+            // -------------------------------------------------------
+            // CARD 2: DOWNLOAD TRAFFIC
+            // -------------------------------------------------------
             BorderSurface {
-              width: (parent.width - Style.space(10)) / 2
+              id: downloadCard
+              width: (parent.width - Style.space(12)) / 2
+              implicitHeight: downloadCol.implicitHeight + Style.space(24)
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-              radius: Style.cornerRadius
-              leftPadding: Style.space(12)
-              rightPadding: Style.space(12)
-              topPadding: Style.space(10)
-              bottomPadding: Style.space(10)
+              radius: Style.space(12)
+              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
 
-              ColumnLayout {
-                anchors.fill: parent
-                spacing: Style.space(2)
+              Column {
+                id: downloadCol
+                x: Style.space(14)
+                y: Style.space(12)
+                width: parent.width - Style.space(28)
+                spacing: Style.space(4)
 
-                // Card Header
-                RowLayout {
+                // Header
+                Row {
                   spacing: Style.space(6)
-                  Layout.fillWidth: true
-
                   Text {
                     text: "󰇚"
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption * 1.1
                     color: root.dim
                   }
-
                   Text {
                     text: "Download"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
-                    color: root.dim
+                    color: root.foreground
                   }
                 }
 
-                // Metric text
+                // Primary Metric
                 Text {
                   text: (root.parentWidget ? Model.formatBytes(root.parentWidget.downloadRate) : "0 B") + "/s"
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.title * 1.15
+                  font.pixelSize: Style.space(24)
                   font.bold: true
                   color: root.foreground
                 }
 
-                // Metric subtext
+                // Subtitle Metric
                 Text {
                   text: root.parentWidget ? Model.formatBytes(root.parentWidget.downloadTotal) : "0 B"
                   font.family: root.fontFamily
@@ -535,16 +510,18 @@ Panel {
                   color: root.dim
                 }
 
-                Item { height: Style.space(4) }
+                Item { width: 1; height: Style.space(4) }
 
-                // Sparkline Graph
+                // Sparkline
                 Canvas {
                   id: downloadSparkline
-                  Layout.fillWidth: true
-                  height: Style.space(40)
+                  width: parent.width
+                  height: Style.space(46)
 
                   property var history: root.parentWidget ? root.parentWidget.downlinkHistory : []
                   onHistoryChanged: requestPaint()
+                  onWidthChanged: requestPaint()
+                  Component.onCompleted: requestPaint()
 
                   onPaint: {
                     var ctx = getContext("2d")
@@ -552,7 +529,17 @@ Panel {
                     var w = width
                     var h = height
                     var pts = history || []
-                    if (pts.length < 2 || w <= 0 || h <= 0) return
+                    if (w <= 0 || h <= 0) return
+
+                    if (pts.length < 2) {
+                      ctx.beginPath()
+                      ctx.moveTo(0, h - 3)
+                      ctx.lineTo(w, h - 3)
+                      ctx.strokeStyle = "#0084ff"
+                      ctx.lineWidth = 2.0
+                      ctx.stroke()
+                      return
+                    }
 
                     var maxVal = 1
                     for (var i = 0; i < pts.length; i++) {
@@ -567,24 +554,24 @@ Panel {
                     ctx.moveTo(0, h)
                     for (var j = 0; j < pts.length; j++) {
                       var x = j * step
-                      var y = h - 2 - (pts[j] / maxVal) * (h - 6)
+                      var y = h - 3 - (pts[j] / maxVal) * (h - 8)
                       ctx.lineTo(x, y)
                     }
                     ctx.lineTo((pts.length - 1) * step, h)
                     ctx.closePath()
-                    ctx.fillStyle = Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.12)
+                    ctx.fillStyle = "rgba(0, 132, 255, 0.15)"
                     ctx.fill()
 
                     // Stroke polyline
                     ctx.beginPath()
                     for (var k = 0; k < pts.length; k++) {
                       var px = k * step
-                      var py = h - 2 - (pts[k] / maxVal) * (h - 6)
+                      var py = h - 3 - (pts[k] / maxVal) * (h - 8)
                       if (k === 0) ctx.moveTo(px, py)
                       else ctx.lineTo(px, py)
                     }
-                    ctx.strokeStyle = Color.accent
-                    ctx.lineWidth = 1.8
+                    ctx.strokeStyle = "#0084ff"
+                    ctx.lineWidth = 2.0
                     ctx.lineJoin = "round"
                     ctx.lineCap = "round"
                     ctx.stroke()
@@ -593,91 +580,83 @@ Panel {
               }
             }
 
-            // 3. Status Card (Memory, Goroutines, Uptime)
+            // -------------------------------------------------------
+            // CARD 3: STATUS
+            // -------------------------------------------------------
             BorderSurface {
-              width: (parent.width - Style.space(10)) / 2
+              id: statusCard
+              width: (parent.width - Style.space(12)) / 2
+              implicitHeight: statusCol.implicitHeight + Style.space(24)
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-              radius: Style.cornerRadius
-              leftPadding: Style.space(12)
-              rightPadding: Style.space(12)
-              topPadding: Style.space(10)
-              bottomPadding: Style.space(10)
+              radius: Style.space(12)
+              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
 
-              ColumnLayout {
-                anchors.fill: parent
-                spacing: Style.space(6)
+              Column {
+                id: statusCol
+                x: Style.space(14)
+                y: Style.space(12)
+                width: parent.width - Style.space(28)
+                spacing: Style.space(10)
 
-                // Card Header
-                RowLayout {
+                // Header
+                Row {
                   spacing: Style.space(6)
-                  Layout.fillWidth: true
-
                   Text {
                     text: "󰍛"
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption * 1.1
                     color: root.dim
                   }
-
                   Text {
                     text: "Status"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
-                    color: root.dim
+                    color: root.foreground
                   }
                 }
 
-                // DataLines
-                RowLayout {
-                  Layout.fillWidth: true
+                // Line 1: Memory
+                Item {
+                  width: parent.width
+                  height: Style.space(20)
                   Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "Memory"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     color: root.dim
                   }
-                  Item { Layout.fillWidth: true }
                   Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     text: Model.formatBytes(root.parentWidget ? root.parentWidget.memory : 0)
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
                     color: root.foreground
                   }
                 }
 
-                RowLayout {
-                  Layout.fillWidth: true
+                // Line 2: Goroutines
+                Item {
+                  width: parent.width
+                  height: Style.space(20)
                   Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "Goroutines"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     color: root.dim
                   }
-                  Item { Layout.fillWidth: true }
                   Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     text: String(root.parentWidget ? root.parentWidget.goroutines : 0)
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                    color: root.foreground
-                  }
-                }
-
-                RowLayout {
-                  Layout.fillWidth: true
-                  Text {
-                    text: "Uptime"
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    color: root.dim
-                  }
-                  Item { Layout.fillWidth: true }
-                  Text {
-                    text: root.parentWidget && root.parentWidget.uptime ? root.parentWidget.uptime : "--"
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
                     color: root.foreground
                   }
@@ -685,91 +664,83 @@ Panel {
               }
             }
 
-            // 4. Connections Card (Inbound, Outbound, Total)
+            // -------------------------------------------------------
+            // CARD 4: CONNECTIONS
+            // -------------------------------------------------------
             BorderSurface {
-              width: (parent.width - Style.space(10)) / 2
+              id: connCard
+              width: (parent.width - Style.space(12)) / 2
+              implicitHeight: connCol.implicitHeight + Style.space(24)
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-              radius: Style.cornerRadius
-              leftPadding: Style.space(12)
-              rightPadding: Style.space(12)
-              topPadding: Style.space(10)
-              bottomPadding: Style.space(10)
+              radius: Style.space(12)
+              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
 
-              ColumnLayout {
-                anchors.fill: parent
-                spacing: Style.space(6)
+              Column {
+                id: connCol
+                x: Style.space(14)
+                y: Style.space(12)
+                width: parent.width - Style.space(28)
+                spacing: Style.space(10)
 
-                // Card Header
-                RowLayout {
+                // Header
+                Row {
                   spacing: Style.space(6)
-                  Layout.fillWidth: true
-
                   Text {
                     text: "󰛳"
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption * 1.1
                     color: root.dim
                   }
-
                   Text {
                     text: "Connections"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
-                    color: root.dim
+                    color: root.foreground
                   }
                 }
 
-                // DataLines
-                RowLayout {
-                  Layout.fillWidth: true
+                // Line 1: Inbound
+                Item {
+                  width: parent.width
+                  height: Style.space(20)
                   Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "Inbound"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     color: root.dim
                   }
-                  Item { Layout.fillWidth: true }
                   Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     text: String(root.parentWidget ? root.parentWidget.connectionsIn : 0)
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
                     color: root.foreground
                   }
                 }
 
-                RowLayout {
-                  Layout.fillWidth: true
+                // Line 2: Outbound
+                Item {
+                  width: parent.width
+                  height: Style.space(20)
                   Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "Outbound"
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     color: root.dim
                   }
-                  Item { Layout.fillWidth: true }
                   Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     text: String(root.parentWidget ? root.parentWidget.connectionsOut : 0)
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                    color: root.foreground
-                  }
-                }
-
-                RowLayout {
-                  Layout.fillWidth: true
-                  Text {
-                    text: "Active Tracked"
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    color: root.dim
-                  }
-                  Item { Layout.fillWidth: true }
-                  Text {
-                    text: (root.parentWidget ? root.parentWidget.connCount : 0) + " conns"
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.caption * 1.05
                     font.bold: true
                     color: root.foreground
                   }
@@ -778,147 +749,92 @@ Panel {
             }
           }
 
-          // 5. Clash Mode Card (Wide Card)
+          // ---------------------------------------------------------
+          // CARD 5: MODE (WIDE CARD WITH SEGMENTED SWITCHER)
+          // ---------------------------------------------------------
           BorderSurface {
+            id: modeCard
             width: parent.width
+            implicitHeight: modeCol.implicitHeight + Style.space(24)
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-            radius: Style.cornerRadius
-            leftPadding: Style.space(12)
-            rightPadding: Style.space(12)
-            topPadding: Style.space(10)
-            bottomPadding: Style.space(10)
+            radius: Style.space(12)
+            borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
 
-            ColumnLayout {
-              anchors.fill: parent
-              spacing: Style.space(8)
+            Column {
+              id: modeCol
+              x: Style.space(14)
+              y: Style.space(12)
+              width: parent.width - Style.space(28)
+              spacing: Style.space(10)
 
-              // Card Header
-              RowLayout {
+              // Header
+              Row {
                 spacing: Style.space(6)
-                Layout.fillWidth: true
-
                 Text {
                   text: "󰑮"
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption * 1.1
                   color: root.dim
                 }
-
                 Text {
                   text: "Mode"
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.caption * 1.05
                   font.bold: true
-                  color: root.dim
+                  color: root.foreground
                 }
               }
 
-              // Segmented Mode Selector (AdaptiveSegmented)
-              BorderSurface {
-                Layout.fillWidth: true
-                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
-                radius: Style.cornerRadius
-                leftPadding: Style.space(3)
-                rightPadding: Style.space(3)
-                topPadding: Style.space(3)
-                bottomPadding: Style.space(3)
+              // Segmented Container
+              Rectangle {
+                width: parent.width
+                height: Style.space(38)
+                color: "#141416"
+                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                border.width: 1
+                radius: Style.space(8)
 
-                RowLayout {
+                Row {
+                  id: modeRow
                   anchors.fill: parent
-                  spacing: Style.space(4)
+                  anchors.margins: Style.space(3)
+                  spacing: Style.space(2)
+
+                  property var modes: ["rule", "direct", "global"]
+                  property real itemWidth: (width - (modes.length - 1) * spacing) / modes.length
 
                   Repeater {
-                    model: root.parentWidget && root.parentWidget.modeList ? root.parentWidget.modeList : ["Rule", "Direct", "Global"]
+                    model: modeRow.modes
 
-                    Button {
-                      text: modelData
-                      selected: root.parentWidget && root.parentWidget.currentMode.toLowerCase() === modelData.toLowerCase()
-                      bordered: false
-                      Layout.fillWidth: true
-                      onClicked: root.setMode(modelData)
+                    Rectangle {
+                      id: modeBtn
+                      width: modeRow.itemWidth
+                      height: modeRow.height
+                      radius: Style.space(6)
+                      property bool isSelected: root.parentWidget && root.parentWidget.currentMode.toLowerCase() === modelData.toLowerCase()
+
+                      color: isSelected ? "#2c2c2e" : (modeMouse.containsMouse ? Qt.rgba(255, 255, 255, 0.05) : "transparent")
+                      border.color: isSelected ? Qt.rgba(255, 255, 255, 0.15) : "transparent"
+                      border.width: isSelected ? 1 : 0
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: modelData
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption * 1.05
+                        font.bold: modeBtn.isSelected
+                        color: modeBtn.isSelected ? "#ffffff" : root.dim
+                      }
+
+                      MouseArea {
+                        id: modeMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.setMode(modelData)
+                      }
                     }
                   }
-                }
-              }
-            }
-          }
-
-          // 6. Active Outbound Card (Wide Card matching sing-box-dashboard ProfileCard)
-          BorderSurface {
-            width: parent.width
-            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-            radius: Style.cornerRadius
-            leftPadding: Style.space(12)
-            rightPadding: Style.space(12)
-            topPadding: Style.space(10)
-            bottomPadding: Style.space(10)
-
-            ColumnLayout {
-              anchors.fill: parent
-              spacing: Style.space(8)
-
-              // Card Header
-              RowLayout {
-                spacing: Style.space(6)
-                Layout.fillWidth: true
-
-                Text {
-                  text: "󰄬"
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption * 1.1
-                  color: "#4caf50"
-                }
-
-                Text {
-                  text: "Active Outbound"
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                  color: root.dim
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Text {
-                  text: root.parentWidget && root.parentWidget.online ? "Connected" : "Disconnected"
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption * 0.9
-                  color: root.parentWidget && root.parentWidget.online ? "#4caf50" : "#f44336"
-                }
-              }
-
-              // Outbound Detail Row
-              RowLayout {
-                Layout.fillWidth: true
-                spacing: Style.space(8)
-
-                ColumnLayout {
-                  spacing: Style.space(2)
-                  Layout.fillWidth: true
-
-                  Text {
-                    text: root.parentWidget && root.parentWidget.activeNode ? root.parentWidget.activeNode : "Direct Outbound"
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body * 1.05
-                    font.bold: true
-                    color: root.foreground
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                  }
-
-                  Text {
-                    text: "Active in group: " + (root.parentWidget && root.parentWidget.groupsData && root.parentWidget.groupsData.length > 0 ? root.parentWidget.groupsData[0].name : "select")
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption * 0.9
-                    color: root.dim
-                  }
-                }
-
-                Button {
-                  text: "Switch"
-                  iconText: "󰒍"
-                  tooltipText: "Browse and select nodes in groups"
-                  onClicked: root.currentTab = "groups"
                 }
               }
             }
