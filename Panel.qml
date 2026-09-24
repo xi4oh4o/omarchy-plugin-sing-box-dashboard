@@ -31,6 +31,8 @@ Panel {
   property var connectionsList: []
   property var logsList: []
 
+  readonly property real availableTabHeight: Math.max(Style.space(200), (panel.availableCardHeight > 0 ? Math.min(panel.availableCardHeight, Style.space(680)) : Style.space(680)) - Style.space(210))
+
   readonly property var displayedLogs: {
     var list = root.logsList || []
     var q = (root.searchLog || "").trim().toLowerCase()
@@ -954,7 +956,7 @@ Panel {
           Flickable {
             id: groupsFlickable
             width: parent.width
-            height: Math.min(groupsCol.implicitHeight, Style.space(520))
+            height: Math.min(groupsCol.implicitHeight, root.availableTabHeight)
             implicitHeight: height
             contentWidth: width
             contentHeight: groupsCol.implicitHeight
@@ -966,7 +968,7 @@ Panel {
 
             Column {
               id: groupsCol
-              width: parent.width
+              width: parent.width - (groupsFlickable.interactive ? Style.space(8) : 0)
               spacing: Style.space(14)
 
               Repeater {
@@ -1267,7 +1269,7 @@ Panel {
           Flickable {
             id: connFlickable
             width: parent.width
-            height: Math.min(connsCol.implicitHeight, Style.space(520))
+            height: Math.min(connsCol.implicitHeight, root.availableTabHeight)
             implicitHeight: height
             contentWidth: width
             contentHeight: connsCol.implicitHeight
@@ -1279,7 +1281,7 @@ Panel {
 
             Column {
               id: connsCol
-              width: parent.width
+              width: parent.width - (connFlickable.interactive ? Style.space(8) : 0)
               spacing: Style.space(8)
 
               Repeater {
@@ -1306,6 +1308,7 @@ Panel {
                   radius: Style.space(10)
                   border.color: connHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.2) : Qt.rgba(255, 255, 255, 0.08)
                   border.width: 1
+                  clip: true
 
                   property var cData: modelData
 
@@ -1348,6 +1351,7 @@ Panel {
                         color: "#ffffff"
                         elide: Text.ElideRight
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                       }
 
                       // Close button (visible when hovering)
@@ -1382,10 +1386,11 @@ Panel {
                     // Line 2: 3 Columns matching official dashboard
                     RowLayout {
                       width: parent.width
+                      spacing: Style.space(6)
 
                       // Col 1: Transfer Rates (↑ 0 B/s, ↓ 1 KB/s)
                       Column {
-                        Layout.preferredWidth: Style.space(110)
+                        Layout.preferredWidth: Style.space(90)
                         spacing: Style.space(2)
 
                         Text {
@@ -1405,7 +1410,7 @@ Panel {
 
                       // Col 2: Total Transferred (↑ 2.1 KB, ↓ 5.5 KB)
                       Column {
-                        Layout.preferredWidth: Style.space(110)
+                        Layout.preferredWidth: Style.space(90)
                         spacing: Style.space(2)
 
                         Text {
@@ -1423,26 +1428,30 @@ Panel {
                         }
                       }
 
-                      Item { Layout.fillWidth: true }
-
                       // Col 3: Inbound & Outbound / Route (tun/tun-in, select)
                       Column {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         spacing: Style.space(2)
 
                         Text {
-                          anchors.right: parent.right
+                          width: parent.width
+                          horizontalAlignment: Text.AlignRight
                           text: connCardItem.cData.inbound || "tun/tun-in"
                           font.family: root.fontFamily
                           font.pixelSize: Style.font.caption * 0.95
                           color: root.dim
+                          elide: Text.ElideRight
                         }
 
                         Text {
-                          anchors.right: parent.right
+                          width: parent.width
+                          horizontalAlignment: Text.AlignRight
                           text: connCardItem.cData.route || connCardItem.cData.outbound || "select"
                           font.family: root.fontFamily
                           font.pixelSize: Style.font.caption * 0.95
                           color: root.dim
+                          elide: Text.ElideRight
                         }
                       }
                     }
