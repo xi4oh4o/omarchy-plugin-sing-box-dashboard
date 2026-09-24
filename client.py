@@ -95,6 +95,27 @@ def parse_bytes_unit(val_str, unit_str):
         return 0
 
 
+def format_bytes_val(b):
+    try:
+        val = float(b)
+        if val <= 0:
+            return "0 B"
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if val < 1024 or unit == "TB":
+                return f"{val:.1f} {unit}".replace(".0 ", " ")
+            val /= 1024
+        return f"{val:.1f} TB"
+    except Exception:
+        return "0 B"
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+_opener = urllib.request.build_opener(NoRedirectHandler)
+
+
 def http_request(url, path, secret, method="GET", body=None, timeout=3):
     full_url = f"{normalize_url(url)}/{path.lstrip('/')}"
     headers = {"Accept": "application/json"}
@@ -108,7 +129,7 @@ def http_request(url, path, secret, method="GET", body=None, timeout=3):
 
     req = urllib.request.Request(full_url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             content_type = resp.headers.get("Content-Type", "")
             raw = resp.read().decode("utf-8", errors="replace")
             if "application/json" in content_type or raw.startswith("{") or raw.startswith("["):
@@ -498,11 +519,11 @@ def get_groups(url, secret):
 
 def get_connections(url, secret):
     # Try Clash API
-    res = http_request(url, "/connections", secret, timeout=3)
+    res = http_request(url, "/connections", secret, timeout=2)
     if res["ok"] and isinstance(res.get("data"), dict) and "connections" in res["data"]:
         raw_conns = res["data"].get("connections", [])
         conn_list = []
-        for c in raw_conns[:100]:
+        for c in raw_conns[:150]:
             meta = c.get("metadata", {})
             host = meta.get("host") or meta.get("destinationIP", "")
             port = meta.get("destinationPort", "")
@@ -511,81 +532,92 @@ def get_connections(url, secret):
             rule = c.get("rule", "")
             chains = c.get("chains", [])
             outbound = chains[0] if chains else ""
+            inbound = meta.get("type", "inbound")
+            inbound_name = meta.get("inbound", "")
+            in_label = f"{inbound}/{inbound_name}" if inbound_name and inbound != inbound_name else inbound
+
             conn_list.append({
                 "id": c.get("id", ""),
                 "host": host,
                 "destination": dest,
                 "network": network,
-                "source": f"{meta.get('sourceIP', '')}:{meta.get('sourcePort', '')}",
-                "inbound": meta.get("type", "inbound"),
+                "status": "Active",
+                "inbound": in_label,
                 "outbound": outbound,
+                "chain": " / ".join(chains) if chains else outbound,
+                "route": outbound or "direct",
                 "rule": rule,
+                "upRate": f"↑ {format_bytes_val(c.get('curUploadRate', 0))}/s",
+                "downRate": f"↓ {format_bytes_val(c.get('curDownloadRate', 0))}/s",
+                "upTotal": f"↑ {format_bytes_val(c.get('upload', 0))}",
+                "downTotal": f"↓ {format_bytes_val(c.get('download', 0))}",
                 "upload": c.get("upload", 0),
                 "download": c.get("download", 0),
-                "curUploadRate": c.get("curUploadRate", 0),
-                "curDownloadRate": c.get("curDownloadRate", 0),
-                "start": c.get("start", ""),
             })
         return {
             "online": True,
             "connections": conn_list,
             "totalCount": len(raw_conns),
-            "uploadTotal": res["data"].get("uploadTotal", 0),
-            "downloadTotal": res["data"].get("downloadTotal", 0),
         }
 
-    # Fallback to daemon CLI
+    # Fallback to sing-box 1.14 daemon CLI
     try:
-        proc = subprocess.run(
-            ["sing-box", "api", "connection", "list", "--columns", "id,network,destination,inbound,outbound,total,rule", "--url", url, "--secret", secret],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
+        cmd = [
+            "sing-box", "api", "connection", "list",
+            "--columns", "id,network,destination,inbound,outbound,chain,rule,rate,total",
+            "--url", url,
+            "--secret", secret
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if proc.returncode != 0:
             return {"online": False, "error": proc.stderr.strip() or "Failed to list connections"}
         conn_list = []
-        pattern = re.compile(r"^([0-9a-fA-F\-]{36})\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(↑\S+\s+[A-Za-z/]+\s+↓\S+\s+[A-Za-z/]+)\s*(.*)$")
         for line in proc.stdout.splitlines():
             line = line.strip()
-            m = pattern.match(line)
-            if not m:
+            if not line or line.startswith("ID"):
                 continue
-            cid = m.group(1)
-            cnet = m.group(2).upper()
-            cdest = m.group(3)
-            cin = m.group(4)
-            cout = m.group(5)
-            ctot = m.group(6)
-            crule = m.group(7).strip()
-            if crule == "-":
-                crule = ""
+            parts = line.split("\t")
+            if len(parts) >= 9:
+                cid, cnet, cdest, cin, cout, cchain, crule, crate, ctot = parts[:9]
+                chost = cdest.split(":")[0] if ":" in cdest else cdest
 
-            chost = cdest.split(":")[0] if ":" in cdest else cdest
+                # Format upload and download totals
+                up_total = "↑ 0 B"
+                down_total = "↓ 0 B"
+                tot_m = re.search(r"↑([0-9.]+)\s*([A-Za-z]+)\s*↓([0-9.]+)\s*([A-Za-z]+)", ctot)
+                if tot_m:
+                    up_total = f"↑ {tot_m.group(1)} {tot_m.group(2).upper()}"
+                    down_total = f"↓ {tot_m.group(3)} {tot_m.group(4).upper()}"
 
-            # Parse upload & download from total: ↑12 kB ↓17 kB
-            up_bytes = 0
-            down_bytes = 0
-            tot_m = re.search(r"↑([0-9.]+)\s*([A-Za-z]+)\s*↓([0-9.]+)\s*([A-Za-z]+)", ctot)
-            if tot_m:
-                up_bytes = parse_bytes_unit(tot_m.group(1), tot_m.group(2))
-                down_bytes = parse_bytes_unit(tot_m.group(3), tot_m.group(4))
+                # Format upload and download rates
+                up_rate = "↑ 0 B/s"
+                down_rate = "↓ 0 B/s"
+                if crate and crate != "-":
+                    rate_m = re.search(r"↑([0-9.]+)\s*([A-Za-z/]+)\s*↓([0-9.]+)\s*([A-Za-z/]+)", crate)
+                    if rate_m:
+                        up_rate = f"↑ {rate_m.group(1)} {rate_m.group(2)}"
+                        down_rate = f"↓ {rate_m.group(3)} {rate_m.group(4)}"
 
-            conn_list.append({
-                "id": cid,
-                "host": chost,
-                "destination": cdest,
-                "network": cnet,
-                "source": "",
-                "inbound": cin,
-                "outbound": cout,
-                "rule": crule,
-                "upload": up_bytes,
-                "download": down_bytes,
-                "totalText": ctot,
-                "start": "",
-            })
-        return {"online": True, "connections": conn_list[:100], "totalCount": len(conn_list)}
+                # Route group (e.g. "select" from "select/Reality-Dallas")
+                route_name = cchain.split("/")[0] if ("/" in cchain and cchain != "-") else (cout if cout != "-" else cin)
+
+                conn_list.append({
+                    "id": cid,
+                    "host": chost,
+                    "destination": cdest,
+                    "network": cnet.upper(),
+                    "status": "Active",
+                    "inbound": cin,
+                    "outbound": cout,
+                    "chain": cchain,
+                    "route": route_name,
+                    "rule": "" if crule == "-" else crule,
+                    "upRate": up_rate,
+                    "downRate": down_rate,
+                    "upTotal": up_total,
+                    "downTotal": down_total,
+                })
+        return {"online": True, "connections": conn_list[:150], "totalCount": len(conn_list)}
     except Exception as e:
         return {"online": False, "error": str(e)}
 
@@ -719,37 +751,31 @@ def set_mode(url, secret, mode):
 
 
 def close_connection(url, secret, conn_id):
-    res = http_request(url, f"/connections/{conn_id}", secret, method="DELETE")
-    if res["ok"]:
-        return {"success": True}
     try:
         proc = subprocess.run(
             ["sing-box", "api", "connection", "close", conn_id, "--url", url, "--secret", secret],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=4,
         )
         if proc.returncode == 0:
             return {"success": True}
-        return {"success": False, "error": proc.stderr.strip() or res.get("error")}
+        return {"success": False, "error": proc.stderr.strip()}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 def close_connections(url, secret):
-    res = http_request(url, "/connections", secret, method="DELETE")
-    if res["ok"]:
-        return {"success": True}
     try:
         proc = subprocess.run(
             ["sing-box", "api", "connection", "close", "--all", "--url", url, "--secret", secret],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=4,
         )
         if proc.returncode == 0:
             return {"success": True}
-        return {"success": False, "error": proc.stderr.strip() or res.get("error")}
+        return {"success": False, "error": proc.stderr.strip()}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

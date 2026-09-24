@@ -101,26 +101,34 @@ Panel {
   }
 
   function closeConn(connId) {
-    if (!parentWidget) return
-    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "close-connection", connId]
+    var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
+    var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
+    actionProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "close-connection", connId]
     actionProc.running = true
+    root.connectionsList = (root.connectionsList || []).filter(function(c) { return c.id !== connId })
   }
 
   function closeAllConns() {
-    if (!parentWidget) return
-    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "close-connections"]
+    var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
+    var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
+    actionProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "close-connections"]
     actionProc.running = true
+    root.connectionsList = []
   }
 
   function fetchGroups() {
-    if (!parentWidget || groupsProc.running) return
-    groupsProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "groups"]
+    if (groupsProc.running) return
+    var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
+    var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
+    groupsProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "groups"]
     groupsProc.running = true
   }
 
   function fetchConnections() {
-    if (!parentWidget || connectionsProc.running) return
-    connectionsProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "connections"]
+    if (connectionsProc.running) return
+    var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
+    var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
+    connectionsProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "connections"]
     connectionsProc.running = true
   }
 
@@ -1158,8 +1166,9 @@ Panel {
 
             TextField {
               id: connSearchField
-              placeholderText: "Search host, outbound, or network..."
+              placeholderText: "Search"
               Layout.fillWidth: true
+              text: root.searchConnection
               onTextChanged: root.searchConnection = text
             }
 
@@ -1190,123 +1199,190 @@ Panel {
           Flickable {
             id: connFlickable
             width: parent.width
-            height: Style.space(330)
+            height: Math.min(connsCol.implicitHeight, Style.space(520))
+            implicitHeight: height
             contentWidth: width
             contentHeight: connsCol.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            interactive: contentHeight > height
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             Column {
               id: connsCol
               width: parent.width
-              spacing: Style.space(6)
+              spacing: Style.space(8)
 
               Repeater {
                 model: {
                   if (!root.connectionsList) return []
                   if (!root.searchConnection) return root.connectionsList
-                  var q = root.searchConnection.toLowerCase()
+                  var q = root.searchConnection.trim().toLowerCase()
                   return root.connectionsList.filter(function(c) {
                     return (c.host && c.host.toLowerCase().indexOf(q) !== -1) ||
                            (c.destination && c.destination.toLowerCase().indexOf(q) !== -1) ||
+                           (c.route && c.route.toLowerCase().indexOf(q) !== -1) ||
                            (c.outbound && c.outbound.toLowerCase().indexOf(q) !== -1) ||
+                           (c.inbound && c.inbound.toLowerCase().indexOf(q) !== -1) ||
                            (c.network && c.network.toLowerCase().indexOf(q) !== -1)
                   })
                 }
 
                 BorderSurface {
+                  id: connCardItem
                   width: parent.width
-                  color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
-                  radius: Style.cornerRadius
-                  leftPadding: Style.space(10)
-                  rightPadding: Style.space(10)
-                  topPadding: Style.space(6)
-                  bottomPadding: Style.space(6)
+                  implicitHeight: connCardInner.implicitHeight + Style.space(20)
+                  height: implicitHeight
+                  color: connHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.07) : "#1c1c1e"
+                  radius: Style.space(10)
+                  borderSpec: Border.solid(1, connHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.2) : Qt.rgba(255, 255, 255, 0.08))
 
-                  RowLayout {
-                    anchors.fill: parent
+                  property var cData: modelData
+
+                  Column {
+                    id: connCardInner
+                    x: Style.space(14)
+                    y: Style.space(10)
+                    width: parent.width - Style.space(28)
                     spacing: Style.space(8)
 
-                    ColumnLayout {
-                      spacing: Style.space(2)
-                      Layout.fillWidth: true
+                    // Line 1: Header (TCP Badge, Destination Host, Active Badge / Close Button)
+                    RowLayout {
+                      width: parent.width
+                      spacing: Style.space(8)
 
-                      RowLayout {
-                        spacing: Style.space(6)
-
-                        // Network badge
-                        BorderSurface {
-                          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
-                          radius: Style.cornerRadius
-                          leftPadding: Style.space(4)
-                          rightPadding: Style.space(4)
-                          topPadding: Style.space(1)
-                          bottomPadding: Style.space(1)
-
-                          Text {
-                            anchors.centerIn: parent
-                            text: modelData.network || "TCP"
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption * 0.85
-                            font.bold: true
-                            color: Color.accent
-                          }
-                        }
-
-                        // Host / Destination
-                        Text {
-                          text: modelData.destination || modelData.host || "Unknown"
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.body * 0.95
-                          font.bold: true
-                          color: root.foreground
-                          elide: Text.ElideMiddle
-                          Layout.fillWidth: true
-                        }
-                      }
-
-                      // Sub line: Outbound • Traffic
-                      RowLayout {
-                        spacing: Style.space(6)
+                      // Network pill (e.g. TCP, UDP)
+                      Rectangle {
+                        width: netText.implicitWidth + Style.space(12)
+                        height: Style.space(20)
+                        radius: Style.space(4)
+                        color: "#2c2c2e"
 
                         Text {
-                          text: "Via: " + (modelData.outbound || "direct")
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption * 0.9
-                          color: root.dim
-                        }
-
-                        Text {
-                          text: "•"
-                          color: root.dim
-                          font.pixelSize: Style.font.caption * 0.9
-                        }
-
-                        Text {
-                          text: modelData.totalText ? modelData.totalText : ("↑ " + Model.formatBytes(modelData.upload) + "  ↓ " + Model.formatBytes(modelData.download))
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption * 0.9
-                          color: root.foreground
-                        }
-
-                        Text {
-                          visible: Boolean(modelData.rule)
-                          text: "• " + modelData.rule
+                          id: netText
+                          anchors.centerIn: parent
+                          text: (connCardItem.cData.network || "TCP").toUpperCase()
                           font.family: root.fontFamily
                           font.pixelSize: Style.font.caption * 0.85
-                          color: root.dim
-                          elide: Text.ElideRight
-                          Layout.fillWidth: true
+                          font.bold: true
+                          color: "#aaaaaa"
+                        }
+                      }
+
+                      // Host / Destination (Monospace white text)
+                      Text {
+                        text: connCardItem.cData.host || connCardItem.cData.destination || "Unknown"
+                        font.family: "monospace"
+                        font.pixelSize: Style.font.caption * 1.05
+                        font.bold: true
+                        color: "#ffffff"
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                      }
+
+                      // Close button (visible when hovering)
+                      Button {
+                        id: closeBtn
+                        visible: connHoverArea.containsMouse
+                        iconText: "󰅙"
+                        tooltipText: "Close this connection"
+                        onClicked: root.closeConn(connCardItem.cData.id)
+                      }
+
+                      // Active status badge (green pill)
+                      Rectangle {
+                        visible: !closeBtn.visible
+                        width: activeText.implicitWidth + Style.space(16)
+                        height: Style.space(20)
+                        radius: Style.space(4)
+                        color: "rgba(52, 211, 153, 0.15)"
+
+                        Text {
+                          id: activeText
+                          anchors.centerIn: parent
+                          text: "Active"
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption * 0.85
+                          font.bold: true
+                          color: "#34d399"
                         }
                       }
                     }
 
-                    // Close connection button
-                    Button {
-                      iconText: "󰅙"
-                      tooltipText: "Close this connection"
-                      onClicked: root.closeConn(modelData.id)
+                    // Line 2: 3 Columns matching official dashboard
+                    RowLayout {
+                      width: parent.width
+
+                      // Col 1: Transfer Rates (↑ 0 B/s, ↓ 1 KB/s)
+                      Column {
+                        Layout.preferredWidth: Style.space(110)
+                        spacing: Style.space(2)
+
+                        Text {
+                          text: connCardItem.cData.upRate || "↑ 0 B/s"
+                          font.family: "monospace"
+                          font.pixelSize: Style.font.caption * 0.95
+                          color: root.dim
+                        }
+
+                        Text {
+                          text: connCardItem.cData.downRate || "↓ 0 B/s"
+                          font.family: "monospace"
+                          font.pixelSize: Style.font.caption * 0.95
+                          color: root.dim
+                        }
+                      }
+
+                      // Col 2: Total Transferred (↑ 2.1 KB, ↓ 5.5 KB)
+                      Column {
+                        Layout.preferredWidth: Style.space(110)
+                        spacing: Style.space(2)
+
+                        Text {
+                          text: connCardItem.cData.upTotal || "↑ 0 B"
+                          font.family: "monospace"
+                          font.pixelSize: Style.font.caption * 0.95
+                          color: root.dim
+                        }
+
+                        Text {
+                          text: connCardItem.cData.downTotal || "↓ 0 B"
+                          font.family: "monospace"
+                          font.pixelSize: Style.font.caption * 0.95
+                          color: root.dim
+                        }
+                      }
+
+                      Item { Layout.fillWidth: true }
+
+                      // Col 3: Inbound & Outbound / Route (tun/tun-in, select)
+                      Column {
+                        spacing: Style.space(2)
+
+                        Text {
+                          anchors.right: parent.right
+                          text: connCardItem.cData.inbound || "tun/tun-in"
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption * 0.95
+                          color: root.dim
+                        }
+
+                        Text {
+                          anchors.right: parent.right
+                          text: connCardItem.cData.route || connCardItem.cData.outbound || "select"
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption * 0.95
+                          color: root.dim
+                        }
+                      }
                     }
+                  }
+
+                  MouseArea {
+                    id: connHoverArea
+                    anchors.fill: parent
+                    hoverEnabled: true
                   }
                 }
               }
@@ -1317,7 +1393,8 @@ Panel {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 topPadding: Style.space(40)
-                text: "No active connections tracked"
+                bottomPadding: Style.space(40)
+                text: "No active connections"
                 font.family: root.fontFamily
                 color: root.dim
               }
