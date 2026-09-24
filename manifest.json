@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "sing-box-dashboard",
+  "name": "sing-box dashboard",
+  "version": "1.0.0",
+  "author": "xi4oh4o",
+  "license": "MIT",
+  "description": "sing-box status, proxy node switcher, and traffic monitor for Omarchy",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "sing-box",
+    "description": "sing-box proxy controller, traffic monitor, and node selector",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "url": "http://127.0.0.1:9090",
+      "password": "",
+      "refreshIntervalSec": 2
+    },
+    "schema": [
+      {
+        "key": "url",
+        "type": "string",
+        "label": "API URL",
+        "defaultValue": "http://127.0.0.1:9090",
+        "description": "sing-box HTTP API URL (e.g. http://127.0.0.1:9090 or http://127.0.0.1:9091)"
+      },
+      {
+        "key": "password",
+        "type": "string",
+        "label": "API Password",
+        "defaultValue": "",
+        "description": "sing-box API secret / Bearer token"
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 2
+      }
+    ]
+  }
+}
