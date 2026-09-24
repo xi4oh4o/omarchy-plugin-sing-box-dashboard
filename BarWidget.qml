@@ -31,6 +31,11 @@ BarWidget {
   property int connCount: 0
   property real memory: 0
   property int goroutines: 0
+  property string uptime: ""
+  property int connectionsIn: 0
+  property int connectionsOut: 0
+  property var uplinkHistory: []
+  property var downlinkHistory: []
   property var groupsData: []
   property bool busy: false
 
@@ -95,9 +100,25 @@ BarWidget {
             root.uploadTotal = Number(res.uploadTotal) || 0
             root.downloadTotal = Number(res.downloadTotal) || 0
             root.connCount = Number(res.connectionsCount) || 0
+            root.connectionsIn = Number(res.connectionsIn) || 0
+            root.connectionsOut = Number(res.connectionsOut) || 0
+            root.uptime = String(res.uptime || "")
             root.memory = Number(res.memory) || 0
             root.goroutines = Number(res.goroutines) || 0
             root.groupsData = res.groups || []
+
+            var up = Number(res.uploadRate) || 0
+            var down = Number(res.downloadRate) || 0
+
+            var upHist = root.uplinkHistory.slice()
+            upHist.push(up)
+            if (upHist.length > 30) upHist.shift()
+            root.uplinkHistory = upHist
+
+            var downHist = root.downlinkHistory.slice()
+            downHist.push(down)
+            if (downHist.length > 30) downHist.shift()
+            root.downlinkHistory = downHist
           }
         } catch (e) {
           root.online = false

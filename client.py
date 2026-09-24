@@ -213,11 +213,14 @@ def get_clash_status(url, secret):
         "mode": mode,
         "modeList": mode_list,
         "activeNode": active_node,
+        "uptime": "",
         "uploadRate": up_rate,
         "downloadRate": down_rate,
         "uploadTotal": upload_total,
         "downloadTotal": download_total,
         "connectionsCount": conn_count,
+        "connectionsIn": conn_count,
+        "connectionsOut": conn_count,
         "memory": 0,
         "goroutines": 0,
         "groups": groups,
@@ -258,6 +261,12 @@ def get_daemon_status(url, secret):
         memory_bytes = 0
         goroutines = 0
 
+        # Uptime: 1h32m11s
+        uptime = ""
+        upt_m = re.search(r"Uptime:\s*(\S+)", stat_out)
+        if upt_m:
+            uptime = upt_m.group(1)
+
         # Memory: 133 MB
         mem_m = re.search(r"Memory:\s*([0-9.]+)\s*([A-Za-z]+)", stat_out)
         if mem_m:
@@ -269,13 +278,18 @@ def get_daemon_status(url, secret):
             goroutines = int(gor_m.group(1))
 
         # Connections: 19 in / 29 out
+        conn_in = 0
+        conn_out = 0
         conn_m = re.search(r"Connections:\s*([0-9]+)\s*in\s*/\s*([0-9]+)\s*out", stat_out)
         if conn_m:
-            conn_count = int(conn_m.group(2))
+            conn_in = int(conn_m.group(1))
+            conn_out = int(conn_m.group(2))
+            conn_count = conn_out
         else:
             conn_single = re.search(r"Connections(?:\s*Out)?:\s*([0-9]+)", stat_out)
             if conn_single:
                 conn_count = int(conn_single.group(1))
+                conn_out = conn_count
 
         # Uplink: 1.7 kB/s (127 MB total)
         up_m = re.search(r"Uplink:\s*([0-9.]+)\s*([A-Za-z/]+)(?:\s*\(([0-9.]+)\s*([A-Za-z]+)\s*total\))?", stat_out)
@@ -367,11 +381,14 @@ def get_daemon_status(url, secret):
             "mode": mode,
             "modeList": mode_list,
             "activeNode": active_node,
+            "uptime": uptime,
             "uploadRate": upload_rate,
             "downloadRate": download_rate,
             "uploadTotal": upload_total,
             "downloadTotal": download_total,
             "connectionsCount": conn_count,
+            "connectionsIn": conn_in,
+            "connectionsOut": conn_out,
             "memory": memory_bytes,
             "goroutines": goroutines,
             "groups": groups,
