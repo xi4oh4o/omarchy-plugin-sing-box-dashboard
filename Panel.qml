@@ -65,7 +65,8 @@ Panel {
   }
 
   function toggle() {
-    root.opened ? close() : open()
+    if (root.opened) root.close()
+    else root.open()
   }
 
   function switchPanel(direction) {
@@ -245,7 +246,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(540))
-    contentHeight: panel.fittedContentHeight(Math.min(contentCol.implicitHeight + Style.space(24), 680))
+    contentHeight: panel.fittedContentHeight(contentCol.implicitHeight, Style.space(680))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -383,14 +384,15 @@ Panel {
             width: parent.width
 
             // 1. Upload Traffic Card
-            BorderSurface {
+            Rectangle {
               id: uploadCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: uploadCol.implicitHeight + Style.space(24)
               height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
-              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
+              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+              border.width: 1
 
               Column {
                 id: uploadCol
@@ -503,14 +505,15 @@ Panel {
             }
 
             // 2. Download Traffic Card
-            BorderSurface {
+            Rectangle {
               id: downloadCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: downloadCol.implicitHeight + Style.space(24)
               height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
-              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
+              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+              border.width: 1
 
               Column {
                 id: downloadCol
@@ -623,14 +626,15 @@ Panel {
             }
 
             // 3. Status Card (Memory, Goroutines)
-            BorderSurface {
+            Rectangle {
               id: statusCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: statusCol.implicitHeight + Style.space(24)
               height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
-              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
+              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+              border.width: 1
 
               Column {
                 id: statusCol
@@ -706,14 +710,15 @@ Panel {
             }
 
             // 4. Connections Card (Inbound, Outbound)
-            BorderSurface {
+            Rectangle {
               id: connCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: connCol.implicitHeight + Style.space(24)
               height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
-              borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
+              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+              border.width: 1
 
               Column {
                 id: connCol
@@ -790,14 +795,15 @@ Panel {
           }
 
           // 5. Mode Card (Wide Card matching screenshot)
-          BorderSurface {
+          Rectangle {
             id: modeCard
             width: parent.width
             implicitHeight: modeCol.implicitHeight + Style.space(24)
             height: implicitHeight
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
             radius: Style.space(12)
-            borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
+            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+            border.width: 1
 
             Column {
               id: modeCol
@@ -910,14 +916,15 @@ Panel {
               Repeater {
                 model: root.parentWidget && root.parentWidget.groupsData ? root.parentWidget.groupsData : []
 
-                BorderSurface {
+                Rectangle {
                   id: groupCardSurface
                   width: parent.width
                   implicitHeight: groupCardInner.implicitHeight + Style.space(24)
                   height: implicitHeight
                   color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
                   radius: Style.space(12)
-                  borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
+                  border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+                  border.width: 1
 
                   property var groupInfo: modelData
                   property bool isExpanded: root.isGroupExpanded(root.expandedGroups, groupInfo.name, index)
@@ -935,24 +942,29 @@ Panel {
                       width: parent.width
                       spacing: Style.space(8)
 
-                      Row {
-                        spacing: Style.space(6)
+                      Item {
                         Layout.fillWidth: true
+                        implicitHeight: groupTitleRow.implicitHeight
 
-                        Text {
-                          text: groupCardSurface.groupInfo.name || "group"
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.title * 0.95
-                          font.bold: true
-                          color: root.foreground
-                        }
+                        Row {
+                          id: groupTitleRow
+                          anchors.verticalCenter: parent.verticalCenter
+                          spacing: Style.space(6)
 
-                        Text {
-                          anchors.baseline: parent.children[0].baseline
-                          text: Model.proxyDisplayType(groupCardSurface.groupInfo.type)
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption * 1.05
-                          color: root.dim
+                          Text {
+                            text: groupCardSurface.groupInfo.name || "group"
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.title * 0.95
+                            font.bold: true
+                            color: root.foreground
+                          }
+
+                          Text {
+                            text: Model.proxyDisplayType(groupCardSurface.groupInfo.type)
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption * 1.05
+                            color: root.dim
+                          }
                         }
 
                         MouseArea {
@@ -1018,7 +1030,7 @@ Panel {
                           property bool isSelected: groupCardSurface.groupInfo.selected === itemData.name
                           property int delayVal: Number(itemData.delay) || 0
 
-                          color: isSelected ? "rgba(0, 132, 255, 0.16)" : (nodeHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.08) : "#1c1c1e")
+                          color: isSelected ? Qt.rgba(0, 132/255, 1, 0.16) : (nodeHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.08) : "#1c1c1e")
                           border.color: isSelected ? "#0084ff" : (nodeHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.22) : Qt.rgba(255, 255, 255, 0.08))
                           border.width: isSelected ? 1.5 : 1
 
@@ -1229,14 +1241,15 @@ Panel {
                   })
                 }
 
-                BorderSurface {
+                Rectangle {
                   id: connCardItem
                   width: parent.width
                   implicitHeight: connCardInner.implicitHeight + Style.space(20)
                   height: implicitHeight
                   color: connHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.07) : "#1c1c1e"
                   radius: Style.space(10)
-                  borderSpec: Border.solid(1, connHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.2) : Qt.rgba(255, 255, 255, 0.08))
+                  border.color: connHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.2) : Qt.rgba(255, 255, 255, 0.08)
+                  border.width: 1
 
                   property var cData: modelData
 
@@ -1296,7 +1309,7 @@ Panel {
                         width: activeText.implicitWidth + Style.space(16)
                         height: Style.space(20)
                         radius: Style.space(4)
-                        color: "rgba(52, 211, 153, 0.15)"
+                        color: Qt.rgba(52/255, 211/255, 153/255, 0.15)
 
                         Text {
                           id: activeText

@@ -54,8 +54,12 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.close()
   }
 
-  function toggle() {
+  function togglePanel() {
     if (panelLoader.item) panelLoader.item.toggle()
+  }
+
+  function toggle() {
+    togglePanel()
   }
 
   function closeForPopoutSwitch() {
@@ -65,13 +69,15 @@ BarWidget {
   function injectPanel() {
     var item = panelLoader.item
     if (!item) return
-    item.bar = root.bar
-    item.anchorItem = button
-    item.hostWidget = root
-    item.parentWidget = root
+    if ("bar" in item) item.bar = root.bar
+    if ("settings" in item) item.settings = root.settings
+    if ("anchorItem" in item) item.anchorItem = button
+    if ("hostWidget" in item) item.hostWidget = root
+    if ("parentWidget" in item) item.parentWidget = root
   }
 
   onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
 
   readonly property string scriptPath: Qt.resolvedUrl("client.py").toString().replace(/^file:\/\//, "")
 
@@ -176,12 +182,24 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  IpcHandler {
+    target: "sing-box-dashboard"
+
+    function refresh() { root.refreshNow() }
+    function open() { root.open() }
+    function close() { root.close() }
+    function show() { root.open() }
+    function hide() { root.close() }
+    function toggle() { root.togglePanel() }
+  }
+
   WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     text: root.buttonLabel
     active: root.opened
+    Component.onCompleted: root.injectPanel()
     tooltipText: root.online
       ? ("sing-box [" + root.currentMode + "]\n" +
          (root.activeNode ? "Node: " + root.activeNode + "\n" : "") +
@@ -190,8 +208,9 @@ BarWidget {
       : (root.httpStatus === 401
           ? "sing-box: 401 Unauthorized\nClick to configure API password"
           : "sing-box: Offline\nClick to check connection")
-    onPressed: function(mouseButton) {
-      if (mouseButton === Qt.LeftButton) root.toggle()
+    onPressed: function(b) {
+      if (b === Qt.RightButton) root.refreshNow()
+      else root.togglePanel()
     }
   }
 }
