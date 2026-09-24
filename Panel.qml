@@ -315,13 +315,10 @@ Panel {
             height: Style.space(22)
             Layout.alignment: Qt.AlignVCenter
 
-            Image {
+            SingBoxIcon {
               anchors.fill: parent
-              fillMode: Image.PreserveAspectFit
-              source: Qt.resolvedUrl("icon.svg")
-              sourceSize.width: 64
-              sourceSize.height: 64
-              smooth: true
+              iconSize: Style.space(22)
+              color: root.foreground
             }
 
             Rectangle {

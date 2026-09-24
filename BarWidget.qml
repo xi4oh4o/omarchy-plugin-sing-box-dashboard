@@ -236,16 +236,13 @@ BarWidget {
       anchors.centerIn: parent
       spacing: Style.space(6)
 
-      Image {
+      SingBoxIcon {
         id: boxIcon
         width: Style.space(16)
         height: Style.space(16)
+        iconSize: Style.space(16)
+        color: root.foreground
         anchors.verticalCenter: parent.verticalCenter
-        fillMode: Image.PreserveAspectFit
-        source: Qt.resolvedUrl("icon.svg")
-        sourceSize.width: 48
-        sourceSize.height: 48
-        smooth: true
       }
 
       Text {
