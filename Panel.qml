@@ -172,20 +172,16 @@ Panel {
   function setTrafficDisplay(enabled) {
     root.showTrafficSetting = enabled
     if (root.parentWidget) {
-      root.parentWidget.showTraffic = enabled
+      root.parentWidget.setShowTraffic(enabled)
+    } else {
+      setTrafficProc.command = ["python3", root.scriptPath, "set-traffic", enabled ? "true" : "false"]
+      setTrafficProc.running = false
+      setTrafficProc.running = true
     }
-    setTrafficProc.command = ["python3", root.scriptPath, "set-traffic", enabled ? "true" : "false"]
-    setTrafficProc.running = true
   }
 
   Process {
     id: setTrafficProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.parentWidget) root.parentWidget.refreshNow()
-      }
-    }
   }
 
   function openDashboard() {

@@ -41,6 +41,19 @@ BarWidget {
 
   readonly property var configuredShowTraffic: setting("showTraffic", null)
   property bool showTraffic: configuredShowTraffic !== null ? Boolean(configuredShowTraffic) : true
+  property double lastTrafficToggleTime: 0
+
+  function setShowTraffic(enabled) {
+    root.lastTrafficToggleTime = Date.now()
+    root.showTraffic = enabled
+    persistTrafficProc.command = ["python3", root.scriptPath, "set-traffic", enabled ? "true" : "false"]
+    persistTrafficProc.running = false
+    persistTrafficProc.running = true
+  }
+
+  Process {
+    id: persistTrafficProc
+  }
 
   readonly property color foreground: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.5)
@@ -100,7 +113,9 @@ BarWidget {
           root.errorText = String(res.error || "")
           root.apiType = String(res.apiType || "daemon")
           if (res.showTraffic !== undefined && root.configuredShowTraffic === null) {
-            root.showTraffic = res.showTraffic === true
+            if (Date.now() - root.lastTrafficToggleTime > 3000) {
+              root.showTraffic = res.showTraffic === true
+            }
           }
           if (root.online) {
             root.version = String(res.version || "")
@@ -203,7 +218,7 @@ BarWidget {
     function show() { root.open() }
     function hide() { root.close() }
     function toggle() { root.togglePanel() }
-    function toggleTraffic() { root.showTraffic = !root.showTraffic }
+    function toggleTraffic() { root.setShowTraffic(!root.showTraffic) }
   }
 
   WidgetButton {
