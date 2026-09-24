@@ -23,7 +23,7 @@ Panel {
   readonly property string scriptPath: Qt.resolvedUrl("client.py").toString().replace(/^file:\/\//, "")
 
   property string currentTab: "overview"
-  property int activeGroupIndex: 0
+  property var expandedGroups: ({})
   property string searchConnection: ""
   property string selectedLogLevel: "info"
   property var connectionsList: []
@@ -34,6 +34,20 @@ Panel {
   property bool showPassword: false
   property string actionMessage: ""
 
+  function isGroupExpanded(expandedMap, groupName, index) {
+    if (expandedMap && expandedMap[groupName] !== undefined) {
+      return expandedMap[groupName] === true
+    }
+    return index === 0
+  }
+
+  function toggleGroupExpand(groupName, index) {
+    var cur = isGroupExpanded(expandedGroups, groupName, index)
+    var next = Object.assign({}, expandedGroups)
+    next[groupName] = !cur
+    expandedGroups = next
+  }
+
   function open() {
     if (parentWidget) {
       inputUrl = parentWidget.effectiveUrl || "http://127.0.0.1:9091"
@@ -42,6 +56,7 @@ Panel {
     }
     currentTab = "overview"
     fetchConnections()
+    fetchGroups()
     root.controller.show()
   }
 
@@ -97,6 +112,12 @@ Panel {
     actionProc.running = true
   }
 
+  function fetchGroups() {
+    if (!parentWidget || groupsProc.running) return
+    groupsProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "groups"]
+    groupsProc.running = true
+  }
+
   function fetchConnections() {
     if (!parentWidget || connectionsProc.running) return
     connectionsProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "connections"]
@@ -147,7 +168,25 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         if (parentWidget) parentWidget.refreshNow()
+        root.fetchGroups()
         if (root.currentTab === "connections") root.fetchConnections()
+      }
+    }
+  }
+
+  Process {
+    id: groupsProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var raw = String(text || "").trim()
+        if (!raw) return
+        try {
+          var res = JSON.parse(raw)
+          if (res.online && res.groups && root.parentWidget) {
+            root.parentWidget.groupsData = res.groups
+          }
+        } catch (e) {}
       }
     }
   }
@@ -197,8 +236,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(500))
-    contentHeight: panel.fittedContentHeight(contentCol.implicitHeight + Style.space(24))
+    contentWidth: panel.fittedContentWidth(Style.space(540))
+    contentHeight: panel.fittedContentHeight(Math.min(contentCol.implicitHeight + Style.space(24), 680))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -212,7 +251,7 @@ Panel {
         spacing: Style.space(12)
 
         // -----------------------------------------------------------
-        // Top Bar: Title & Navigation Tabs
+        // Top Bar: Dynamic Title & Quick Actions
         // -----------------------------------------------------------
         RowLayout {
           width: parent.width
@@ -226,7 +265,7 @@ Panel {
           }
 
           Text {
-            text: "Overview"
+            text: root.currentTab === "groups" ? "Groups" : (root.currentTab === "connections" ? "Connections" : (root.currentTab === "logs" ? "Logs" : (root.currentTab === "settings" ? "Settings" : "Overview")))
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
             font.bold: true
@@ -248,12 +287,13 @@ Panel {
             iconSpinning: root.parentWidget ? root.parentWidget.busy : false
             onClicked: {
               if (root.parentWidget) root.parentWidget.refreshNow()
+              root.fetchGroups()
               if (root.currentTab === "connections") root.fetchConnections()
               if (root.currentTab === "logs") root.fetchLogs()
             }
           }
 
-          // Settings shortcut button (tune icon matching screenshot top-right)
+          // Settings shortcut button
           Button {
             iconText: "󰒓"
             tooltipText: "Configure API settings"
@@ -284,7 +324,7 @@ Panel {
             Layout.fillWidth: true
             onClicked: {
               root.currentTab = "groups"
-              if (root.parentWidget) root.parentWidget.refreshNow()
+              root.fetchGroups()
             }
           }
 
@@ -334,13 +374,12 @@ Panel {
             spacing: Style.space(12)
             width: parent.width
 
-            // -------------------------------------------------------
-            // CARD 1: UPLOAD TRAFFIC
-            // -------------------------------------------------------
+            // 1. Upload Traffic Card
             BorderSurface {
               id: uploadCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: uploadCol.implicitHeight + Style.space(24)
+              height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
               borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
@@ -426,7 +465,6 @@ Panel {
 
                     var step = w / Math.max(pts.length - 1, 1)
 
-                    // Fill polygon
                     ctx.beginPath()
                     ctx.moveTo(0, h)
                     for (var j = 0; j < pts.length; j++) {
@@ -439,7 +477,6 @@ Panel {
                     ctx.fillStyle = "rgba(0, 132, 255, 0.15)"
                     ctx.fill()
 
-                    // Stroke polyline
                     ctx.beginPath()
                     for (var k = 0; k < pts.length; k++) {
                       var px = k * step
@@ -457,13 +494,12 @@ Panel {
               }
             }
 
-            // -------------------------------------------------------
-            // CARD 2: DOWNLOAD TRAFFIC
-            // -------------------------------------------------------
+            // 2. Download Traffic Card
             BorderSurface {
               id: downloadCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: downloadCol.implicitHeight + Style.space(24)
+              height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
               borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
@@ -549,7 +585,6 @@ Panel {
 
                     var step = w / Math.max(pts.length - 1, 1)
 
-                    // Fill polygon
                     ctx.beginPath()
                     ctx.moveTo(0, h)
                     for (var j = 0; j < pts.length; j++) {
@@ -562,7 +597,6 @@ Panel {
                     ctx.fillStyle = "rgba(0, 132, 255, 0.15)"
                     ctx.fill()
 
-                    // Stroke polyline
                     ctx.beginPath()
                     for (var k = 0; k < pts.length; k++) {
                       var px = k * step
@@ -580,13 +614,12 @@ Panel {
               }
             }
 
-            // -------------------------------------------------------
-            // CARD 3: STATUS
-            // -------------------------------------------------------
+            // 3. Status Card (Memory, Goroutines)
             BorderSurface {
               id: statusCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: statusCol.implicitHeight + Style.space(24)
+              height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
               borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
@@ -664,13 +697,12 @@ Panel {
               }
             }
 
-            // -------------------------------------------------------
-            // CARD 4: CONNECTIONS
-            // -------------------------------------------------------
+            // 4. Connections Card (Inbound, Outbound)
             BorderSurface {
               id: connCard
               width: (parent.width - Style.space(12)) / 2
               implicitHeight: connCol.implicitHeight + Style.space(24)
+              height: implicitHeight
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
               radius: Style.space(12)
               borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
@@ -749,13 +781,12 @@ Panel {
             }
           }
 
-          // ---------------------------------------------------------
-          // CARD 5: MODE (WIDE CARD WITH SEGMENTED SWITCHER)
-          // ---------------------------------------------------------
+          // 5. Mode Card (Wide Card matching screenshot)
           BorderSurface {
             id: modeCard
             width: parent.width
             implicitHeight: modeCol.implicitHeight + Style.space(24)
+            height: implicitHeight
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
             radius: Style.space(12)
             borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
@@ -842,166 +873,269 @@ Panel {
         }
 
         // -----------------------------------------------------------
-        // TAB 2: GROUPS
+        // TAB 2: GROUPS (MATCHING OFFICIAL sing-box-dashboard GroupsView)
         // -----------------------------------------------------------
         Column {
+          id: groupsTabCol
           width: parent.width
-          spacing: Style.space(8)
+          spacing: Style.space(12)
           visible: root.currentTab === "groups"
 
-          // Group selector tabs (e.g. select, urltest)
-          RowLayout {
-            width: parent.width
-            spacing: Style.space(6)
-            visible: root.parentWidget && root.parentWidget.groupsData && root.parentWidget.groupsData.length > 1
-
-            Repeater {
-              model: root.parentWidget ? root.parentWidget.groupsData : []
-
-              Button {
-                text: (modelData.name || "group") + " (" + (modelData.items ? modelData.items.length : 0) + ")"
-                selected: root.activeGroupIndex === index
-                bordered: true
-                Layout.fillWidth: true
-                onClicked: root.activeGroupIndex = index
-              }
-            }
-          }
-
-          // Active group action header
-          RowLayout {
-            width: parent.width
-            spacing: Style.space(8)
-
-            property var curGroup: root.parentWidget && root.parentWidget.groupsData && root.parentWidget.groupsData.length > root.activeGroupIndex
-              ? root.parentWidget.groupsData[root.activeGroupIndex] : null
-
-            PanelSectionHeader {
-              text: parent.curGroup ? (parent.curGroup.name.toUpperCase() + " (" + parent.curGroup.type + ")") : "OUTBOUND GROUP"
-              foreground: root.foreground
-              Layout.fillWidth: true
-            }
-
-            Button {
-              text: "Test Group"
-              iconText: "󰓅"
-              tooltipText: "Test latency for nodes in this group"
-              onClicked: {
-                if (parent.curGroup) root.testGroup(parent.curGroup.name)
-              }
-            }
-          }
-
-          // Node List Flickable
           Flickable {
-            id: groupFlickable
+            id: groupsFlickable
             width: parent.width
-            height: Style.space(340)
+            height: Math.min(groupsCol.implicitHeight, Style.space(520))
+            implicitHeight: height
             contentWidth: width
-            contentHeight: groupNodesCol.implicitHeight
+            contentHeight: groupsCol.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-
-            property var activeGroup: root.parentWidget && root.parentWidget.groupsData && root.parentWidget.groupsData.length > root.activeGroupIndex
-              ? root.parentWidget.groupsData[root.activeGroupIndex] : null
+            flickableDirection: Flickable.VerticalFlick
+            interactive: contentHeight > height
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             Column {
-              id: groupNodesCol
+              id: groupsCol
               width: parent.width
-              spacing: Style.space(5)
+              spacing: Style.space(14)
 
               Repeater {
-                model: groupFlickable.activeGroup ? groupFlickable.activeGroup.items : []
+                model: root.parentWidget && root.parentWidget.groupsData ? root.parentWidget.groupsData : []
 
                 BorderSurface {
-                  id: nodeCard
+                  id: groupCardSurface
                   width: parent.width
-                  radius: Style.cornerRadius
-                  property bool isSelected: groupFlickable.activeGroup && groupFlickable.activeGroup.selected === modelData.name
-                  color: isSelected
-                    ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.22)
-                    : (nodeMouseArea.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04))
+                  implicitHeight: groupCardInner.implicitHeight + Style.space(24)
+                  height: implicitHeight
+                  color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
+                  radius: Style.space(12)
+                  borderSpec: Border.solid(1, Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1))
 
-                  leftPadding: Style.space(10)
-                  rightPadding: Style.space(10)
-                  topPadding: Style.space(8)
-                  bottomPadding: Style.space(8)
+                  property var groupInfo: modelData
+                  property bool isExpanded: root.isGroupExpanded(root.expandedGroups, groupInfo.name, index)
+                  property bool isSelectable: String(groupInfo.type || "").toLowerCase() === "selector"
 
-                  MouseArea {
-                    id: nodeMouseArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                      if (groupFlickable.activeGroup) {
-                        root.selectNode(groupFlickable.activeGroup.name, modelData.name)
-                        groupFlickable.activeGroup.selected = modelData.name
-                      }
-                    }
-                  }
+                  Column {
+                    id: groupCardInner
+                    x: Style.space(14)
+                    y: Style.space(12)
+                    width: parent.width - Style.space(28)
+                    spacing: Style.space(12)
 
-                  RowLayout {
-                    anchors.fill: parent
-                    spacing: Style.space(8)
+                    // 1. Group Header Row
+                    RowLayout {
+                      width: parent.width
+                      spacing: Style.space(8)
 
-                    Text {
-                      text: nodeCard.isSelected ? "󰄬" : "󰄰"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      color: nodeCard.isSelected ? Color.accent : root.dim
-                    }
-
-                    ColumnLayout {
-                      spacing: Style.space(1)
-                      Layout.fillWidth: true
-
-                      Text {
-                        text: modelData.name || ""
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
-                        font.bold: nodeCard.isSelected
-                        color: root.foreground
-                        elide: Text.ElideRight
+                      Row {
+                        spacing: Style.space(6)
                         Layout.fillWidth: true
+
+                        Text {
+                          text: groupCardSurface.groupInfo.name || "group"
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.title * 0.95
+                          font.bold: true
+                          color: root.foreground
+                        }
+
+                        Text {
+                          anchors.baseline: parent.children[0].baseline
+                          text: Model.proxyDisplayType(groupCardSurface.groupInfo.type)
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption * 1.05
+                          color: root.dim
+                        }
+
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.toggleGroupExpand(groupCardSurface.groupInfo.name, index)
+                        }
                       }
 
-                      Text {
-                        text: modelData.type || "proxy"
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption * 0.9
-                        color: root.dim
+                      // Node count badge
+                      Rectangle {
+                        width: countBadgeText.implicitWidth + Style.space(14)
+                        height: Style.space(22)
+                        radius: Style.space(11)
+                        color: "#2c2c2e"
+
+                        Text {
+                          id: countBadgeText
+                          anchors.centerIn: parent
+                          text: groupCardSurface.groupInfo.items ? String(groupCardSurface.groupInfo.items.length) : "0"
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                          color: root.dim
+                        }
+                      }
+
+                      // Test Group Button
+                      Button {
+                        iconText: "󰓅"
+                        tooltipText: "Test latency on this group"
+                        onClicked: root.testGroup(groupCardSurface.groupInfo.name)
+                      }
+
+                      // Expand / Collapse Chevron Button
+                      Button {
+                        iconText: groupCardSurface.isExpanded ? "󰅃" : "󰅀"
+                        tooltipText: groupCardSurface.isExpanded ? "Collapse group" : "Expand group"
+                        onClicked: root.toggleGroupExpand(groupCardSurface.groupInfo.name, index)
                       }
                     }
 
-                    // Delay Badge
-                    BorderSurface {
-                      color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-                      radius: Style.cornerRadius
-                      leftPadding: Style.space(6)
-                      rightPadding: Style.space(6)
-                      topPadding: Style.space(2)
-                      bottomPadding: Style.space(2)
+                    // 2. Node Cards Grid (When Expanded)
+                    Grid {
+                      id: nodesGrid
+                      visible: groupCardSurface.isExpanded
+                      width: parent.width
+                      columns: width >= Style.space(460) ? 4 : 3
+                      spacing: Style.space(8)
 
-                      Text {
-                        anchors.centerIn: parent
-                        text: Model.delayText(modelData.delay)
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        font.bold: true
-                        color: Model.delayColor(modelData.delay, root.foreground, root.dim)
+                      property real cardWidth: Math.floor((width - (columns - 1) * spacing) / columns)
+
+                      Repeater {
+                        model: groupCardSurface.groupInfo.items || []
+
+                        Rectangle {
+                          id: nodeCardItem
+                          width: nodesGrid.cardWidth
+                          height: Style.space(58)
+                          radius: Style.space(8)
+
+                          property var itemData: modelData
+                          property bool isSelected: groupCardSurface.groupInfo.selected === itemData.name
+                          property int delayVal: Number(itemData.delay) || 0
+
+                          color: isSelected ? "rgba(0, 132, 255, 0.16)" : (nodeHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.08) : "#1c1c1e")
+                          border.color: isSelected ? "#0084ff" : (nodeHoverArea.containsMouse ? Qt.rgba(255, 255, 255, 0.22) : Qt.rgba(255, 255, 255, 0.08))
+                          border.width: isSelected ? 1.5 : 1
+
+                          Column {
+                            anchors.fill: parent
+                            anchors.margins: Style.space(8)
+                            spacing: Style.space(4)
+
+                            // Node Tag Name
+                            Text {
+                              width: parent.width
+                              text: nodeCardItem.itemData.name || ""
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption * 1.05
+                              font.bold: true
+                              color: "#ffffff"
+                              elide: Text.ElideRight
+                            }
+
+                            // Protocol Type & Delay Text
+                            Item {
+                              width: parent.width
+                              height: Style.space(16)
+
+                              Text {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: Model.proxyDisplayType(nodeCardItem.itemData.type)
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption * 0.9
+                                color: "#888888"
+                              }
+
+                              Text {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: Model.delayText(nodeCardItem.delayVal)
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption * 0.95
+                                font.bold: true
+                                color: Model.delayColor(nodeCardItem.delayVal)
+                              }
+                            }
+                          }
+
+                          ToolTip.visible: nodeHoverArea.containsMouse && nodeCardItem.itemData.name.length > 12
+                          ToolTip.text: nodeCardItem.itemData.name + (nodeCardItem.delayVal > 0 ? " (" + nodeCardItem.delayVal + "ms)" : "")
+
+                          MouseArea {
+                            id: nodeHoverArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: groupCardSurface.isSelectable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                              if (groupCardSurface.isSelectable) {
+                                root.selectNode(groupCardSurface.groupInfo.name, nodeCardItem.itemData.name)
+                                groupCardSurface.groupInfo.selected = nodeCardItem.itemData.name
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+
+                    // 3. Horizontal Latency Dots (When Collapsed)
+                    Flow {
+                      id: dotsFlow
+                      visible: !groupCardSurface.isExpanded
+                      width: parent.width
+                      spacing: Style.space(4)
+
+                      Repeater {
+                        model: groupCardSurface.groupInfo.items || []
+
+                        Rectangle {
+                          id: dotItem
+                          width: 11
+                          height: 11
+                          radius: 2.5
+
+                          property var itemData: modelData
+                          property int delayVal: Number(itemData.delay) || 0
+                          property bool isSelected: groupCardSurface.groupInfo.selected === itemData.name
+
+                          color: Model.delayColor(delayVal)
+
+                          // Inner white circle for selected node
+                          Rectangle {
+                            visible: dotItem.isSelected
+                            anchors.centerIn: parent
+                            width: 4
+                            height: 4
+                            radius: 2
+                            color: "#ffffff"
+                          }
+
+                          ToolTip.visible: dotMouse.containsMouse
+                          ToolTip.text: dotItem.itemData.name + (dotItem.delayVal > 0 ? " (" + dotItem.delayVal + "ms)" : "")
+
+                          MouseArea {
+                            id: dotMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: groupCardSurface.isSelectable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                              if (groupCardSurface.isSelectable) {
+                                root.selectNode(groupCardSurface.groupInfo.name, dotItem.itemData.name)
+                                groupCardSurface.groupInfo.selected = dotItem.itemData.name
+                              }
+                            }
+                          }
+                        }
                       }
                     }
                   }
                 }
               }
 
-              // Empty state
+              // Empty groups fallback
               Text {
-                visible: !groupFlickable.activeGroup || !groupFlickable.activeGroup.items || groupFlickable.activeGroup.items.length === 0
+                visible: !root.parentWidget || !root.parentWidget.groupsData || root.parentWidget.groupsData.length === 0
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 topPadding: Style.space(40)
-                text: "No nodes available in this group"
+                text: "No outbound groups found. Click refresh to query sing-box API."
                 font.family: root.fontFamily
                 color: root.dim
               }

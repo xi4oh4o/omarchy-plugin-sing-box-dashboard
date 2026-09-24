@@ -24,18 +24,50 @@ function formatRate(bytesPerSec) {
   return (i === 0 ? val.toFixed(0) : val.toFixed(1)) + " " + units[i]
 }
 
-function delayColor(delay, foreground, dim) {
+var PROXY_DISPLAY_TYPES = {
+  "direct": "Direct",
+  "block": "Block",
+  "dns": "DNS",
+  "socks": "SOCKS",
+  "http": "HTTP",
+  "shadowsocks": "Shadowsocks",
+  "vmess": "VMess",
+  "trojan": "Trojan",
+  "naive": "Naive",
+  "wireguard": "WireGuard",
+  "hysteria": "Hysteria",
+  "tor": "Tor",
+  "ssh": "SSH",
+  "shadowtls": "ShadowTLS",
+  "shadowsocksr": "ShadowsocksR",
+  "vless": "VLESS",
+  "tuic": "TUIC",
+  "hysteria2": "Hysteria2",
+  "anytls": "AnyTLS",
+  "tailscale": "Tailscale",
+  "selector": "Selector",
+  "urltest": "URLTest",
+  "snell": "Snell"
+}
+
+function proxyDisplayType(type) {
+  if (!type) return "Proxy"
+  var key = String(type).toLowerCase()
+  return PROXY_DISPLAY_TYPES[key] || type
+}
+
+function delayColor(delay) {
   var d = Number(delay) || 0
-  if (d <= 0) return dim || "#888888"
-  if (d < 200) return "#4caf50" // green
-  if (d < 500) return "#ff9800" // orange
-  return "#f44336" // red
+  if (d <= 0) return "#3a3a3c"
+  if (d < 800) return "#34d399" // good (green)
+  if (d < 1500) return "#fb923c" // medium (orange)
+  return "#ef4444" // bad (red)
 }
 
 function delayText(delay) {
   var d = Number(delay) || 0
-  if (d <= 0) return "--"
-  return d + " ms"
+  if (d <= 0) return ""
+  return d + "ms"
 }
 
 function normalizeMode(mode) {
