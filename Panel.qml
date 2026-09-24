@@ -26,8 +26,21 @@ Panel {
   property var expandedGroups: ({})
   property string searchConnection: ""
   property string selectedLogLevel: "info"
+  property string searchLog: ""
+  property bool logsPaused: false
   property var connectionsList: []
   property var logsList: []
+
+  readonly property var displayedLogs: {
+    var list = root.logsList || []
+    var q = (root.searchLog || "").trim().toLowerCase()
+    if (!q) return list
+    return list.filter(function(item) {
+      var plain = ((item.level || "") + " " + (item.seq || "") + " " + (item.message || "")).toLowerCase()
+      return plain.indexOf(q) !== -1
+    })
+  }
+
 
   property string inputUrl: parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : "http://127.0.0.1:9091"
   property string inputPassword: parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
@@ -134,9 +147,19 @@ Panel {
   }
 
   function fetchLogs() {
-    if (!parentWidget || logsProc.running) return
-    logsProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "logs", root.selectedLogLevel]
+    if (logsProc.running) return
+    var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : inputUrl
+    var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : inputPassword
+    logsProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "logs", root.selectedLogLevel]
     logsProc.running = true
+  }
+
+  Timer {
+    id: logsAutoRefreshTimer
+    interval: 2500
+    repeat: true
+    running: root.opened && root.currentTab === "logs" && !root.logsPaused
+    onTriggered: root.fetchLogs()
   }
 
   function saveConfig(newUrl, newPass) {
@@ -1416,14 +1439,97 @@ Panel {
         }
 
         // -----------------------------------------------------------
-        // TAB 4: LOGS
+        // TAB 4: LOGS (BEAUTIFIED MONOSPACE MATCHING OFFICIAL DASHBOARD)
         // -----------------------------------------------------------
         Column {
           width: parent.width
           spacing: Style.space(8)
           visible: root.currentTab === "logs"
 
-          // Logs Level Filter & Refresh
+          // 1. Search Bar & Action Buttons (Pause, Clear, Reload)
+          RowLayout {
+            width: parent.width
+            spacing: Style.space(8)
+
+            // Search pill matching screenshot
+            Rectangle {
+              Layout.fillWidth: true
+              height: Style.space(34)
+              radius: Style.space(8)
+              color: "#1c1c1e"
+              border.color: searchLogInput.activeFocus ? "#0084ff" : Qt.rgba(255, 255, 255, 0.08)
+              border.width: 1
+
+              RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
+                spacing: Style.space(8)
+
+                Text {
+                  text: "󰍉"
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  color: "#8e8e93"
+                }
+
+                TextInput {
+                  id: searchLogInput
+                  Layout.fillWidth: true
+                  text: root.searchLog
+                  onTextChanged: root.searchLog = text
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  color: "#ffffff"
+                  clip: true
+
+                  Text {
+                    visible: !searchLogInput.text && !searchLogInput.activeFocus
+                    text: "Search"
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    color: "#8e8e93"
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                }
+
+                Button {
+                  visible: !!searchLogInput.text
+                  iconText: "✕"
+                  padding: 0
+                  onClicked: {
+                    searchLogInput.text = ""
+                    root.searchLog = ""
+                  }
+                }
+              }
+            }
+
+            // Pause / Resume Auto-scroll
+            Button {
+              iconText: root.logsPaused ? "󰐊" : "󰏤"
+              tooltipText: root.logsPaused ? "Resume auto-scroll" : "Pause auto-scroll"
+              selected: root.logsPaused
+              onClicked: root.logsPaused = !root.logsPaused
+            }
+
+            // Clear View
+            Button {
+              iconText: "󰃢"
+              tooltipText: "Clear logs view"
+              onClicked: root.logsList = []
+            }
+
+            // Refresh
+            Button {
+              iconText: "󰑐"
+              tooltipText: "Reload service logs"
+              iconSpinning: logsProc.running
+              onClicked: root.fetchLogs()
+            }
+          }
+
+          // 2. Logs Level Filter Row
           RowLayout {
             width: parent.width
             spacing: Style.space(6)
@@ -1442,91 +1548,58 @@ Panel {
                 }
               }
             }
-
-            Button {
-              iconText: "󰑐"
-              tooltipText: "Reload service logs"
-              iconSpinning: logsProc.running
-              onClicked: root.fetchLogs()
-            }
           }
 
-          // Logs Console Surface
-          BorderSurface {
+          // 3. Log Console Card (Dark rounded terminal view matching screenshot)
+          Rectangle {
+            id: logsConsoleCard
             width: parent.width
-            height: Style.space(340)
-            color: "#161616"
-            radius: Style.cornerRadius
-            leftPadding: Style.space(8)
-            rightPadding: Style.space(8)
-            topPadding: Style.space(8)
-            bottomPadding: Style.space(8)
+            height: Style.space(360)
+            color: "#161618"
+            radius: Style.space(12)
+            border.color: Qt.rgba(255, 255, 255, 0.08)
+            border.width: 1
+            clip: true
 
             Flickable {
+              id: logsFlickable
               anchors.fill: parent
-              contentWidth: width
+              anchors.margins: Style.space(12)
+              contentWidth: Math.max(width, logLinesCol.implicitWidth)
               contentHeight: logLinesCol.implicitHeight
               clip: true
               boundsBehavior: Flickable.StopAtBounds
 
+              onContentHeightChanged: {
+                if (!root.logsPaused && contentHeight > height) {
+                  contentY = contentHeight - height
+                }
+              }
+
               Column {
                 id: logLinesCol
-                width: parent.width
-                spacing: Style.space(4)
+                spacing: Style.space(3)
 
                 Repeater {
-                  model: root.logsList || []
+                  model: root.displayedLogs
 
-                  RowLayout {
-                    width: parent.width
-                    spacing: Style.space(6)
-
-                    // Level Tag
-                    BorderSurface {
-                      color: {
-                        var lvl = String(modelData.level || "").toLowerCase()
-                        if (lvl === "error") return "#d32f2f"
-                        if (lvl === "warn") return "#f57c00"
-                        if (lvl === "debug") return "#7b1fa2"
-                        if (lvl === "trace") return "#455a64"
-                        return "#1976d2"
-                      }
-                      radius: Style.cornerRadius * 0.6
-                      leftPadding: Style.space(4)
-                      rightPadding: Style.space(4)
-                      topPadding: 1
-                      bottomPadding: 1
-
-                      Text {
-                        anchors.centerIn: parent
-                        text: (modelData.level || "INFO").toUpperCase()
-                        font.family: "Monospace"
-                        font.pixelSize: Style.font.caption * 0.85
-                        font.bold: true
-                        color: "#ffffff"
-                      }
-                    }
-
-                    // Log Message
-                    Text {
-                      text: modelData.message || ""
-                      font.family: "Monospace"
-                      font.pixelSize: Style.font.caption * 0.95
-                      color: "#e0e0e0"
-                      wrapMode: Text.WrapAnywhere
-                      Layout.fillWidth: true
-                    }
+                  Text {
+                    textFormat: Text.RichText
+                    text: Model.formatLogLineHtml(modelData)
+                    font.family: "monospace"
+                    font.pixelSize: Style.font.caption * 0.92
+                    renderType: Text.NativeRendering
                   }
                 }
 
-                // Empty state for logs
                 Text {
-                  visible: !root.logsList || root.logsList.length === 0
-                  width: parent.width
+                  visible: !root.displayedLogs || root.displayedLogs.length === 0
+                  width: logsFlickable.width
                   horizontalAlignment: Text.AlignHCenter
-                  topPadding: Style.space(40)
-                  text: "No log entries found for level " + root.selectedLogLevel
-                  font.family: "Monospace"
+                  topPadding: Style.space(50)
+                  text: root.searchLog ? ("No logs matching \"" + root.searchLog + "\"") : ("No log entries for level " + root.selectedLogLevel)
+                  font.family: "monospace"
+                  font.pixelSize: Style.font.caption
                   color: "#888888"
                 }
               }

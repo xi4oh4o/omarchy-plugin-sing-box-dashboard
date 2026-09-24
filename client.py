@@ -627,38 +627,83 @@ def get_connections(url, secret):
 # -------------------------------------------------------------
 
 def get_logs(url, secret, level="info", search=""):
+    ansi_strip_re = re.compile(r"\x1b\[[0-9;]*m")
     try:
         cmd = ["sing-box", "api", "logs", "--url", url, "--secret", secret]
         if level:
             cmd.extend(["--level", level])
         if search:
             cmd.extend(["--search", search])
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-        if proc.returncode == 0:
+
+        output = ""
+        # Try running in a pseudo-terminal to capture sing-box native ANSI color sequences
+        try:
+            import pty, os, select
+            master, slave = pty.openpty()
+            proc = subprocess.Popen(
+                cmd,
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                close_fds=True,
+            )
+            os.close(slave)
+            raw_output = b""
+            while True:
+                r, _, _ = select.select([master], [], [], 0.3)
+                if not r:
+                    break
+                try:
+                    chunk = os.read(master, 16384)
+                    if not chunk:
+                        break
+                    raw_output += chunk
+                except OSError:
+                    break
+            os.close(master)
+            proc.terminate()
+            try:
+                proc.wait(timeout=0.2)
+            except Exception:
+                pass
+            output = raw_output.decode("utf-8", errors="replace")
+        except Exception:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+            if proc.returncode == 0:
+                output = proc.stdout
+
+        if output:
             entries = []
-            for line in proc.stdout.splitlines()[-80:]:
+            for line in output.splitlines()[-300:]:
                 line = line.strip()
                 if not line:
                     continue
-                # Line format: INFO[5588] dns: refreshed ...
-                m = re.match(r"^([A-Z]+)\[([0-9]+)\]\s*(.*)$", line)
+                plain = ansi_strip_re.sub("", line)
+                # Line format: INFO[14023] [1515020702 0ms] dns: cached ...
+                m = re.match(r"^([A-Z]+)\[([0-9]+)\]\s*(.*)$", plain)
                 if m:
                     entries.append({
                         "level": m.group(1).lower(),
                         "seq": m.group(2),
                         "message": m.group(3),
+                        "raw": line,
                     })
                 else:
                     lvl = "info"
-                    if "ERROR" in line or "[Error]" in line:
+                    if "ERROR" in plain or "[Error]" in plain:
                         lvl = "error"
-                    elif "WARN" in line or "[Warn]" in line:
+                    elif "WARN" in plain or "[Warn]" in plain:
                         lvl = "warn"
-                    elif "DEBUG" in line or "[Debug]" in line:
+                    elif "DEBUG" in plain or "[Debug]" in plain:
                         lvl = "debug"
-                    elif "TRACE" in line or "[Trace]" in line:
+                    elif "TRACE" in plain or "[Trace]" in plain:
                         lvl = "trace"
-                    entries.append({"level": lvl, "seq": "", "message": line})
+                    entries.append({
+                        "level": lvl,
+                        "seq": "",
+                        "message": plain,
+                        "raw": line,
+                    })
             return {"online": True, "logs": entries}
     except Exception:
         pass
