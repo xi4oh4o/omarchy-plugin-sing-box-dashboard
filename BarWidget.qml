@@ -189,19 +189,22 @@ BarWidget {
     return "󰏖  sing-box"
   }
 
+  readonly property real openPanelIndicatorWidth: Math.max(Style.space(16), button.labelWidth)
+  readonly property real openPanelIndicatorHeight: Math.max(Style.space(10), Math.round(Style.bar.iconSlot * 0.55))
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   IpcHandler {
     target: "sing-box-dashboard"
 
-    function refresh() { root.refreshNow() }
-    function open() { root.open() }
-    function close() { root.close() }
-    function show() { root.open() }
-    function hide() { root.close() }
-    function toggle() { root.togglePanel() }
-    function setShowTraffic(enabled) { root.showTraffic = (enabled === true || enabled === "true") }
+    function refresh(): void { root.refreshNow() }
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.togglePanel() }
+    function toggleTraffic(): void { root.showTraffic = !root.showTraffic }
   }
 
   WidgetButton {
@@ -210,6 +213,8 @@ BarWidget {
     bar: root.bar
     text: root.buttonLabel
     active: root.opened
+    useActiveColor: false
+    activeColor: root.foreground
     Component.onCompleted: root.injectPanel()
     tooltipText: root.online
       ? ("sing-box [" + root.currentMode + "]\n" +
