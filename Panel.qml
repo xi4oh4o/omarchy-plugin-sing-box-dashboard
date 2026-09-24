@@ -310,11 +310,30 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
-          Text {
-            text: "󰏖"
-            font.family: Style.font.family
-            font.pixelSize: Style.font.title * 1.15
-            color: root.parentWidget && root.parentWidget.online ? "#4caf50" : (root.parentWidget && root.parentWidget.httpStatus === 401 ? "#ff9800" : "#f44336")
+          Item {
+            width: Style.space(22)
+            height: Style.space(22)
+            Layout.alignment: Qt.AlignVCenter
+
+            Image {
+              anchors.fill: parent
+              fillMode: Image.PreserveAspectFit
+              source: Qt.resolvedUrl("icon.svg")
+              sourceSize.width: 64
+              sourceSize.height: 64
+              smooth: true
+            }
+
+            Rectangle {
+              width: Style.space(7)
+              height: Style.space(7)
+              radius: width / 2
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              color: root.parentWidget && root.parentWidget.online ? "#4caf50" : (root.parentWidget && root.parentWidget.httpStatus === 401 ? "#ff9800" : "#f44336")
+              border.width: 1
+              border.color: "#1e1e20"
+            }
           }
 
           Text {

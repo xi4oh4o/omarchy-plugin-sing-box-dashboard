@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "author": "xi4oh4o",
   "license": "MIT",
+  "icon": "icon.svg",
   "description": "sing-box status, proxy node switcher, and traffic monitor for Omarchy",
   "kinds": [
     "bar-widget"
@@ -15,6 +16,7 @@
   "barWidget": {
     "displayName": "sing-box",
     "description": "sing-box proxy controller, traffic monitor, and node selector",
+    "icon": "icon.svg",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",

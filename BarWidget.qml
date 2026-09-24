@@ -174,44 +174,46 @@ BarWidget {
     }
   }
 
-  readonly property string buttonLabel: {
-    if (root.vertical) return "󰏖"
-    if (!root.showTraffic) {
-      if (root.httpStatus === 401) return "󰏖  Auth Required"
-      return "󰏖"
+  readonly property string trafficLabel: {
+    if (root.vertical || !root.showTraffic) {
+      if (root.httpStatus === 401) return "Auth Required"
+      return ""
     }
     if (root.online) {
-      return "󰏖  ↑ " + Model.formatRate(root.uploadRate) + "  ↓ " + Model.formatRate(root.downloadRate)
+      return "↑ " + Model.formatRate(root.uploadRate) + "  ↓ " + Model.formatRate(root.downloadRate)
     }
     if (root.httpStatus === 401) {
-      return "󰏖  Auth Required"
+      return "Auth Required"
     }
-    return "󰏖  sing-box"
+    return "sing-box"
   }
 
-  readonly property real openPanelIndicatorWidth: Math.max(Style.space(16), button.labelWidth)
+  readonly property real openPanelIndicatorWidth: Math.max(Style.space(16), contentRow.implicitWidth)
   readonly property real openPanelIndicatorHeight: Math.max(Style.space(10), Math.round(Style.bar.iconSlot * 0.55))
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitWidth: root.vertical ? root.barSize : Math.max(root.barSize, contentRow.implicitWidth + Style.space(17))
+  implicitHeight: root.barSize
 
   IpcHandler {
     target: "sing-box-dashboard"
 
-    function refresh(): void { root.refreshNow() }
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function toggle(): void { root.togglePanel() }
-    function toggleTraffic(): void { root.showTraffic = !root.showTraffic }
+    function refresh() { root.refreshNow() }
+    function open() { root.open() }
+    function close() { root.close() }
+    function show() { root.open() }
+    function hide() { root.close() }
+    function toggle() { root.togglePanel() }
+    function toggleTraffic() { root.showTraffic = !root.showTraffic }
   }
 
   WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.buttonLabel
+    text: " "
+    labelVisible: false
+    fixedWidth: root.implicitWidth
+    fixedHeight: root.implicitHeight
     active: root.opened
     useActiveColor: false
     activeColor: root.foreground
@@ -227,6 +229,35 @@ BarWidget {
     onPressed: function(b) {
       if (b === Qt.RightButton) root.refreshNow()
       else root.togglePanel()
+    }
+
+    Row {
+      id: contentRow
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+
+      Image {
+        id: boxIcon
+        width: Style.space(16)
+        height: Style.space(16)
+        anchors.verticalCenter: parent.verticalCenter
+        fillMode: Image.PreserveAspectFit
+        source: Qt.resolvedUrl("icon.svg")
+        sourceSize.width: 48
+        sourceSize.height: 48
+        smooth: true
+      }
+
+      Text {
+        id: labelText
+        visible: root.trafficLabel !== ""
+        text: root.trafficLabel
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        color: root.foreground
+        anchors.verticalCenter: parent.verticalCenter
+        renderType: Text.NativeRendering
+      }
     }
   }
 }
