@@ -99,7 +99,11 @@ BarWidget {
 
   Process {
     id: statusProc
-    command: ["python3", root.scriptPath, "--url", root.effectiveUrl, "--password", root.effectivePassword, "status"]
+    command: ["python3", root.scriptPath, "--url", root.effectiveUrl, "status"]
+    environment: ({
+      "BOX_API_SECRET": root.effectivePassword || "",
+      "BOX_API_URL": root.effectiveUrl || ""
+    })
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -164,7 +168,11 @@ BarWidget {
     onTriggered: {
       if (!statusProc.running) {
         root.busy = true
-        statusProc.command = ["python3", root.scriptPath, "--url", root.effectiveUrl, "--password", root.effectivePassword, "status"]
+        statusProc.environment = ({
+          "BOX_API_SECRET": root.effectivePassword || "",
+          "BOX_API_URL": root.effectiveUrl || ""
+        })
+        statusProc.command = ["python3", root.scriptPath, "--url", root.effectiveUrl, "status"]
         statusProc.running = true
       }
     }
@@ -173,7 +181,11 @@ BarWidget {
   function refreshNow() {
     if (!statusProc.running) {
       root.busy = true
-      statusProc.command = ["python3", root.scriptPath, "--url", root.effectiveUrl, "--password", root.effectivePassword, "status"]
+      statusProc.environment = ({
+        "BOX_API_SECRET": root.effectivePassword || "",
+        "BOX_API_URL": root.effectiveUrl || ""
+      })
+      statusProc.command = ["python3", root.scriptPath, "--url", root.effectiveUrl, "status"]
       statusProc.running = true
     }
   }

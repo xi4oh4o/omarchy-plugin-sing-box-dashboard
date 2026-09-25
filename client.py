@@ -8,6 +8,7 @@ Supports:
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -23,7 +24,16 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 CACHE_FILE = os.path.join(CONFIG_DIR, "state_cache.json")
 
 
+def ensure_config_dir():
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(CONFIG_DIR, 0o700)
+    except Exception:
+        pass
+
+
 def load_config():
+    ensure_config_dir()
     cfg = {
         "url": os.environ.get("BOX_API_URL", "http://127.0.0.1:9091"),
         "password": os.environ.get("BOX_API_SECRET", ""),
@@ -31,6 +41,10 @@ def load_config():
     }
     if os.path.isfile(CONFIG_FILE):
         try:
+            try:
+                os.chmod(CONFIG_FILE, 0o600)
+            except Exception:
+                pass
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 saved = json.load(f)
                 if isinstance(saved, dict):
@@ -46,7 +60,7 @@ def load_config():
 
 
 def save_config(url=None, password=None, show_traffic=None):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+    ensure_config_dir()
     cfg = load_config()
     if url is not None:
         cfg["url"] = url
@@ -54,10 +68,28 @@ def save_config(url=None, password=None, show_traffic=None):
         cfg["password"] = password
     if show_traffic is not None:
         cfg["showTraffic"] = bool(show_traffic)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
-    return cfg
 
+    # Write atomically with strict private mode 0600
+    tmp_file = f"{CONFIG_FILE}.tmp.{os.getpid()}"
+    fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, CONFIG_FILE)
+        try:
+            os.chmod(CONFIG_FILE, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        if os.path.exists(tmp_file):
+            try:
+                os.remove(tmp_file)
+            except Exception:
+                pass
+        raise
+    return cfg
 
 
 def load_cache():
@@ -72,11 +104,40 @@ def load_cache():
 
 def save_cache(cache_data):
     try:
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        ensure_config_dir()
+        tmp_file = f"{CACHE_FILE}.tmp.{os.getpid()}"
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
             json.dump(cache_data, f)
+            f.flush()
+        os.replace(tmp_file, CACHE_FILE)
+        try:
+            os.chmod(CACHE_FILE, 0o600)
+        except Exception:
+            pass
     except Exception:
         pass
+
+
+def is_loopback_host(host):
+    if not host:
+        return False
+    h = host.strip("[]").lower()
+    if h in ("localhost", "127.0.0.1", "::1"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+        return ip.is_loopback
+    except ValueError:
+        return False
+
+
+def is_loopback_url(url):
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        return is_loopback_host(parsed.hostname)
+    except Exception:
+        return False
 
 
 def normalize_url(url):
@@ -84,7 +145,9 @@ def normalize_url(url):
     if not u:
         return "http://127.0.0.1:9091"
     if not u.startswith("http://") and not u.startswith("https://"):
-        return f"http://{u}"
+        host_candidate = u.split("/")[0].split(":")[0].strip("[]")
+        scheme = "http" if is_loopback_host(host_candidate) else "https"
+        return f"{scheme}://{u}"
     return u
 
 
@@ -127,7 +190,21 @@ _opener = urllib.request.build_opener(NoRedirectHandler)
 
 
 def http_request(url, path, secret, method="GET", body=None, timeout=3):
-    full_url = f"{normalize_url(url)}/{path.lstrip('/')}"
+    norm_url = normalize_url(url)
+    full_url = f"{norm_url}/{path.lstrip('/')}"
+    parsed = urllib.parse.urlsplit(full_url)
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname or ""
+
+    # Security check: Never transmit Bearer secret over unencrypted non-loopback HTTP
+    if secret:
+        if scheme == "http" and not is_loopback_host(host):
+            return {
+                "ok": False,
+                "status": 400,
+                "error": f"Insecure transport rejected: Refusing to send API secret over cleartext HTTP to non-loopback endpoint '{host}'. Use HTTPS or a local loopback address (127.0.0.1/localhost)."
+            }
+
     headers = {"Accept": "application/json"}
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
@@ -159,6 +236,69 @@ def http_request(url, path, secret, method="GET", body=None, timeout=3):
         return {"ok": False, "status": e.code, "error": err_msg or str(e)}
     except Exception as e:
         return {"ok": False, "status": 0, "error": str(e)}
+
+
+def run_sing_box_api(cmd_args, url=None, secret=None, **kwargs):
+    if secret and url:
+        parsed = urllib.parse.urlsplit(normalize_url(url))
+        if parsed.scheme.lower() == "http" and not is_loopback_host(parsed.hostname):
+            return subprocess.CompletedProcess(
+                args=["sing-box", "api"] + cmd_args,
+                returncode=1,
+                stdout="",
+                stderr=f"Insecure transport rejected: Refusing to send API secret over cleartext HTTP to non-loopback endpoint '{parsed.hostname}'. Use HTTPS or loopback.",
+            )
+
+    env = os.environ.copy()
+    if secret is not None:
+        env["BOX_API_SECRET"] = secret
+    if url is not None:
+        env["BOX_API_URL"] = url
+
+    clean_args = []
+    skip = False
+    for arg in cmd_args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--secret":
+            skip = True
+            continue
+        if arg.startswith("--secret="):
+            continue
+        clean_args.append(arg)
+
+    full_cmd = ["sing-box", "api"] + clean_args
+    return subprocess.run(full_cmd, env=env, **kwargs)
+
+
+def popen_sing_box_api(cmd_args, url=None, secret=None, **kwargs):
+    if secret and url:
+        parsed = urllib.parse.urlsplit(normalize_url(url))
+        if parsed.scheme.lower() == "http" and not is_loopback_host(parsed.hostname):
+            raise ValueError(f"Insecure transport rejected: Refusing to send API secret over cleartext HTTP to non-loopback endpoint '{parsed.hostname}'. Use HTTPS or loopback.")
+
+    env = os.environ.copy()
+    if secret is not None:
+        env["BOX_API_SECRET"] = secret
+    if url is not None:
+        env["BOX_API_URL"] = url
+
+    clean_args = []
+    skip = False
+    for arg in cmd_args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--secret":
+            skip = True
+            continue
+        if arg.startswith("--secret="):
+            continue
+        clean_args.append(arg)
+
+    full_cmd = ["sing-box", "api"] + clean_args
+    return subprocess.Popen(full_cmd, env=env, **kwargs)
 
 
 # -------------------------------------------------------------
@@ -264,8 +404,10 @@ def get_clash_status(url, secret):
 
 def get_daemon_status(url, secret):
     try:
-        proc = subprocess.run(
-            ["sing-box", "api", "version", "--url", url, "--secret", secret],
+        proc = run_sing_box_api(
+            ["version", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=3,
@@ -276,8 +418,10 @@ def get_daemon_status(url, secret):
         version = proc.stdout.strip()
 
         # Status output
-        status_proc = subprocess.run(
-            ["sing-box", "api", "status", "--url", url, "--secret", secret],
+        status_proc = run_sing_box_api(
+            ["status", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=3,
@@ -338,8 +482,10 @@ def get_daemon_status(url, secret):
 
         # Mode
         mode = "Rule"
-        mode_proc = subprocess.run(
-            ["sing-box", "api", "mode", "--url", url, "--secret", secret],
+        mode_proc = run_sing_box_api(
+            ["mode", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=2,
@@ -348,8 +494,10 @@ def get_daemon_status(url, secret):
             mode = mode_proc.stdout.strip().capitalize()
 
         mode_list = ["Rule", "Global", "Direct"]
-        mlist_proc = subprocess.run(
-            ["sing-box", "api", "mode", "list", "--url", url, "--secret", secret],
+        mlist_proc = run_sing_box_api(
+            ["mode", "list", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=2,
@@ -360,8 +508,10 @@ def get_daemon_status(url, secret):
                 mode_list = lines
 
         # Groups
-        grp_proc = subprocess.run(
-            ["sing-box", "api", "group", "list", "--url", url, "--secret", secret],
+        grp_proc = run_sing_box_api(
+            ["group", "list", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=3,
@@ -380,8 +530,10 @@ def get_daemon_status(url, secret):
 
                 # Show items for group
                 items = []
-                show_proc = subprocess.run(
-                    ["sing-box", "api", "group", "show", gtag, "--url", url, "--secret", secret],
+                show_proc = run_sing_box_api(
+                    ["group", "show", gtag, "--url", url],
+                    url=url,
+                    secret=secret,
                     capture_output=True,
                     text=True,
                     timeout=3,
@@ -483,8 +635,10 @@ def get_groups(url, secret):
 
     # Fallback to daemon CLI
     try:
-        grp_proc = subprocess.run(
-            ["sing-box", "api", "group", "list", "--url", url, "--secret", secret],
+        grp_proc = run_sing_box_api(
+            ["group", "list", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=3,
@@ -502,8 +656,10 @@ def get_groups(url, secret):
                 gtype = parts[1].capitalize()
                 gsel = parts[2] if len(parts) > 2 else ""
                 items = []
-                show_proc = subprocess.run(
-                    ["sing-box", "api", "group", "show", gtag, "--url", url, "--secret", secret],
+                show_proc = run_sing_box_api(
+                    ["group", "show", gtag, "--url", url],
+                    url=url,
+                    secret=secret,
                     capture_output=True,
                     text=True,
                     timeout=3,
@@ -578,12 +734,11 @@ def get_connections(url, secret):
     # Fallback to sing-box 1.14 daemon CLI
     try:
         cmd = [
-            "sing-box", "api", "connection", "list",
+            "connection", "list",
             "--columns", "id,network,destination,inbound,outbound,chain,rule,rate,total",
             "--url", url,
-            "--secret", secret
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        proc = run_sing_box_api(cmd, url=url, secret=secret, capture_output=True, text=True, timeout=5)
         if proc.returncode != 0:
             return {"online": False, "error": proc.stderr.strip() or "Failed to list connections"}
         conn_list = []
@@ -644,7 +799,7 @@ def get_connections(url, secret):
 def get_logs(url, secret, level="info", search=""):
     ansi_strip_re = re.compile(r"\x1b\[[0-9;]*m")
     try:
-        cmd = ["sing-box", "api", "logs", "--url", url, "--secret", secret]
+        cmd = ["logs", "--url", url]
         if level:
             cmd.extend(["--level", level])
         if search:
@@ -655,8 +810,10 @@ def get_logs(url, secret, level="info", search=""):
         try:
             import pty, os, select
             master, slave = pty.openpty()
-            proc = subprocess.Popen(
+            proc = popen_sing_box_api(
                 cmd,
+                url=url,
+                secret=secret,
                 stdin=slave,
                 stdout=slave,
                 stderr=slave,
@@ -683,7 +840,7 @@ def get_logs(url, secret, level="info", search=""):
                 pass
             output = raw_output.decode("utf-8", errors="replace")
         except Exception:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+            proc = run_sing_box_api(cmd, url=url, secret=secret, capture_output=True, text=True, timeout=3)
             if proc.returncode == 0:
                 output = proc.stdout
 
@@ -741,8 +898,10 @@ def select_outbound(url, secret, group, node):
     if res["ok"]:
         return {"success": True}
     try:
-        proc = subprocess.run(
-            ["sing-box", "api", "group", "select", group, node, "--url", url, "--secret", secret],
+        proc = run_sing_box_api(
+            ["group", "select", group, node, "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=3,
@@ -766,8 +925,10 @@ def urltest(url, secret, target=""):
     try:
         # If target specified, test group
         if target:
-            proc = subprocess.run(
-                ["sing-box", "api", "group", "urltest", target, "--url", url, "--secret", secret],
+            proc = run_sing_box_api(
+                ["group", "urltest", target, "--url", url],
+                url=url,
+                secret=secret,
                 capture_output=True,
                 text=True,
                 timeout=6,
@@ -780,8 +941,10 @@ def urltest(url, secret, target=""):
         g_res = get_groups(url, secret)
         if g_res.get("online") and g_res.get("groups"):
             for g in g_res["groups"]:
-                subprocess.run(
-                    ["sing-box", "api", "group", "urltest", g["name"], "--url", url, "--secret", secret],
+                run_sing_box_api(
+                    ["group", "urltest", g["name"], "--url", url],
+                    url=url,
+                    secret=secret,
                     capture_output=True,
                     text=True,
                     timeout=4,
@@ -797,8 +960,10 @@ def set_mode(url, secret, mode):
     if res["ok"]:
         return {"success": True, "mode": mode}
     try:
-        proc = subprocess.run(
-            ["sing-box", "api", "mode", "set", mode.lower(), "--url", url, "--secret", secret],
+        proc = run_sing_box_api(
+            ["mode", "set", mode.lower(), "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=3,
@@ -812,8 +977,10 @@ def set_mode(url, secret, mode):
 
 def close_connection(url, secret, conn_id):
     try:
-        proc = subprocess.run(
-            ["sing-box", "api", "connection", "close", conn_id, "--url", url, "--secret", secret],
+        proc = run_sing_box_api(
+            ["connection", "close", conn_id, "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=4,
@@ -827,8 +994,10 @@ def close_connection(url, secret, conn_id):
 
 def close_connections(url, secret):
     try:
-        proc = subprocess.run(
-            ["sing-box", "api", "connection", "close", "--all", "--url", url, "--secret", secret],
+        proc = run_sing_box_api(
+            ["connection", "close", "--all", "--url", url],
+            url=url,
+            secret=secret,
             capture_output=True,
             text=True,
             timeout=4,
@@ -843,7 +1012,7 @@ def close_connections(url, secret):
 def main():
     parser = argparse.ArgumentParser(description="sing-box API helper")
     parser.add_argument("--url", default="", help="sing-box API URL")
-    parser.add_argument("--password", default="", help="sing-box API password/secret")
+    parser.add_argument("--password", default=None, help="sing-box API password/secret (deprecated: pass BOX_API_SECRET via environment instead)")
     parser.add_argument("command", choices=[
         "status", "groups", "connections", "logs", "select", "urltest",
         "set-mode", "close-connection", "close-connections", "save-config", "get-config", "set-traffic"
@@ -853,8 +1022,17 @@ def main():
     parsed = parser.parse_args()
 
     cfg = load_config()
-    url = parsed.url or cfg["url"]
-    password = parsed.password if parsed.password != "" else cfg["password"]
+    env_url = os.environ.get("BOX_API_URL", "")
+    env_secret = os.environ.get("BOX_API_SECRET")
+
+    url = parsed.url or env_url or cfg.get("url", "http://127.0.0.1:9091")
+
+    if parsed.password is not None:
+        password = parsed.password
+    elif env_secret is not None:
+        password = env_secret
+    else:
+        password = cfg.get("password", "")
 
     if parsed.command == "get-config":
         print(json.dumps(load_config()))
@@ -868,12 +1046,31 @@ def main():
         return
 
     if parsed.command == "save-config":
-        new_url = parsed.args[0] if len(parsed.args) > 0 else url
-        new_pass = parsed.args[1] if len(parsed.args) > 1 else password
+        save_parser = argparse.ArgumentParser(description="save-config")
+        save_parser.add_argument("--url", default=None)
+        save_parser.add_argument("--traffic", default=None)
+        save_parser.add_argument("pos_args", nargs="*", default=[])
+        s_args, _ = save_parser.parse_known_args(parsed.args)
+
+        new_url = s_args.url
+        new_traffic_str = s_args.traffic
+        new_pass = None
+
+        if len(s_args.pos_args) > 0 and new_url is None:
+            new_url = s_args.pos_args[0]
+        if len(s_args.pos_args) > 1:
+            new_pass = s_args.pos_args[1]
+        if len(s_args.pos_args) > 2 and new_traffic_str is None:
+            new_traffic_str = s_args.pos_args[2]
+
+        if env_secret is not None:
+            new_pass = env_secret
+
         show_traffic = None
-        if len(parsed.args) > 2:
-            show_traffic = parsed.args[2].lower() in ("true", "1", "yes", "on")
-        saved = save_config(new_url, new_pass, show_traffic=show_traffic)
+        if new_traffic_str is not None:
+            show_traffic = new_traffic_str.lower() in ("true", "1", "yes", "on")
+
+        saved = save_config(url=new_url, password=new_pass, show_traffic=show_traffic)
         print(json.dumps(saved))
         return
 

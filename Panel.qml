@@ -92,35 +92,49 @@ Panel {
     return false
   }
 
+  function currentProcEnv(customUrl, customPass) {
+    var u = customUrl !== undefined ? customUrl : (parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : inputUrl)
+    var p = customPass !== undefined ? customPass : (parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : inputPassword)
+    return {
+      "BOX_API_URL": u || "",
+      "BOX_API_SECRET": p || ""
+    }
+  }
+
   function setMode(modeName) {
     if (!parentWidget) return
-    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "set-mode", modeName]
+    actionProc.environment = root.currentProcEnv()
+    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "set-mode", modeName]
     actionProc.running = true
     parentWidget.currentMode = modeName
   }
 
   function selectNode(groupName, nodeName) {
     if (!parentWidget) return
-    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "select", groupName, nodeName]
+    actionProc.environment = root.currentProcEnv()
+    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "select", groupName, nodeName]
     actionProc.running = true
   }
 
   function testGroup(groupName) {
     if (!parentWidget) return
-    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "urltest", groupName]
+    actionProc.environment = root.currentProcEnv()
+    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "urltest", groupName]
     actionProc.running = true
   }
 
   function testAll() {
     if (!parentWidget) return
-    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "--password", parentWidget.effectivePassword, "urltest"]
+    actionProc.environment = root.currentProcEnv()
+    actionProc.command = ["python3", root.scriptPath, "--url", parentWidget.effectiveUrl, "urltest"]
     actionProc.running = true
   }
 
   function closeConn(connId) {
     var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
     var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
-    actionProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "close-connection", connId]
+    actionProc.environment = root.currentProcEnv(url, pass)
+    actionProc.command = ["python3", root.scriptPath, "--url", url, "close-connection", connId]
     actionProc.running = true
     root.connectionsList = (root.connectionsList || []).filter(function(c) { return c.id !== connId })
   }
@@ -128,7 +142,8 @@ Panel {
   function closeAllConns() {
     var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
     var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
-    actionProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "close-connections"]
+    actionProc.environment = root.currentProcEnv(url, pass)
+    actionProc.command = ["python3", root.scriptPath, "--url", url, "close-connections"]
     actionProc.running = true
     root.connectionsList = []
   }
@@ -137,7 +152,8 @@ Panel {
     if (groupsProc.running) return
     var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
     var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
-    groupsProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "groups"]
+    groupsProc.environment = root.currentProcEnv(url, pass)
+    groupsProc.command = ["python3", root.scriptPath, "--url", url, "groups"]
     groupsProc.running = true
   }
 
@@ -145,7 +161,8 @@ Panel {
     if (connectionsProc.running) return
     var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : ""
     var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : ""
-    connectionsProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "connections"]
+    connectionsProc.environment = root.currentProcEnv(url, pass)
+    connectionsProc.command = ["python3", root.scriptPath, "--url", url, "connections"]
     connectionsProc.running = true
   }
 
@@ -153,7 +170,8 @@ Panel {
     if (logsProc.running) return
     var url = parentWidget && parentWidget.effectiveUrl ? parentWidget.effectiveUrl : inputUrl
     var pass = parentWidget && parentWidget.effectivePassword ? parentWidget.effectivePassword : inputPassword
-    logsProc.command = ["python3", root.scriptPath, "--url", url, "--password", pass, "logs", root.selectedLogLevel]
+    logsProc.environment = root.currentProcEnv(url, pass)
+    logsProc.command = ["python3", root.scriptPath, "--url", url, "logs", root.selectedLogLevel]
     logsProc.running = true
   }
 
@@ -167,7 +185,11 @@ Panel {
 
   function saveConfig(newUrl, newPass) {
     var trafficStr = (root.parentWidget ? root.parentWidget.showTraffic : root.showTrafficSetting) ? "true" : "false"
-    saveProc.command = ["python3", root.scriptPath, "save-config", newUrl, newPass, trafficStr]
+    saveProc.environment = ({
+      "BOX_API_SECRET": newPass || "",
+      "BOX_API_URL": newUrl || ""
+    })
+    saveProc.command = ["python3", root.scriptPath, "save-config", "--url", newUrl, "--traffic", trafficStr]
     saveProc.running = true
   }
 
@@ -200,6 +222,7 @@ Panel {
 
   Process {
     id: saveProc
+    environment: root.currentProcEnv()
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -215,6 +238,7 @@ Panel {
 
   Process {
     id: actionProc
+    environment: root.currentProcEnv()
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -227,6 +251,7 @@ Panel {
 
   Process {
     id: groupsProc
+    environment: root.currentProcEnv()
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -244,6 +269,7 @@ Panel {
 
   Process {
     id: connectionsProc
+    environment: root.currentProcEnv()
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -261,6 +287,7 @@ Panel {
 
   Process {
     id: logsProc
+    environment: root.currentProcEnv()
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
