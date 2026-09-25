@@ -22,6 +22,10 @@ import urllib.request
 CONFIG_DIR = os.path.expanduser("~/.config/sing-box-dashboard")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 CACHE_FILE = os.path.join(CONFIG_DIR, "state_cache.json")
+MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
+HTTP_READ_CHUNK_BYTES = 64 * 1024
+MAX_LOG_CAPTURE_BYTES = 1024 * 1024
+MAX_LOG_CAPTURE_SECONDS = 2.0
 
 
 def ensure_config_dir():
@@ -189,6 +193,40 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(NoRedirectHandler)
 
 
+class ResponseTooLargeError(ValueError):
+    pass
+
+
+def read_limited_response(response, max_bytes):
+    content_length = response.headers.get("Content-Length")
+    if content_length is not None:
+        try:
+            parsed_content_length = int(content_length)
+        except ValueError:
+            # Invalid or ambiguous Content-Length values are not trusted; the
+            # bounded reads below still enforce the limit at the source.
+            pass
+        else:
+            if parsed_content_length > max_bytes:
+                raise ResponseTooLargeError(
+                    f"HTTP response body exceeds the {max_bytes}-byte limit"
+                )
+
+    body = bytearray()
+    while len(body) <= max_bytes:
+        read_size = min(HTTP_READ_CHUNK_BYTES, max_bytes + 1 - len(body))
+        chunk = response.read(read_size)
+        if not chunk:
+            break
+        body.extend(chunk)
+
+    if len(body) > max_bytes:
+        raise ResponseTooLargeError(
+            f"HTTP response body exceeds the {max_bytes}-byte limit"
+        )
+    return bytes(body)
+
+
 def http_request(url, path, secret, method="GET", body=None, timeout=3):
     norm_url = normalize_url(url)
     full_url = f"{norm_url}/{path.lstrip('/')}"
@@ -218,7 +256,11 @@ def http_request(url, path, secret, method="GET", body=None, timeout=3):
     try:
         with _opener.open(req, timeout=timeout) as resp:
             content_type = resp.headers.get("Content-Type", "")
-            raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                raw_bytes = read_limited_response(resp, MAX_HTTP_RESPONSE_BYTES)
+            except ResponseTooLargeError as e:
+                return {"ok": False, "status": 413, "error": str(e)}
+            raw = raw_bytes.decode("utf-8", errors="replace")
             if "application/json" in content_type or raw.startswith("{") or raw.startswith("["):
                 try:
                     return {"ok": True, "status": resp.status, "data": json.loads(raw)}
@@ -228,9 +270,13 @@ def http_request(url, path, secret, method="GET", body=None, timeout=3):
     except urllib.error.HTTPError as e:
         err_msg = ""
         try:
-            err_raw = e.read().decode("utf-8", errors="replace")
+            err_raw = read_limited_response(e, MAX_HTTP_RESPONSE_BYTES).decode(
+                "utf-8", errors="replace"
+            )
             err_json = json.loads(err_raw)
-            err_msg = err_json.get("message", err_raw)
+            err_msg = err_json.get("message", err_raw) if isinstance(err_json, dict) else err_raw
+        except ResponseTooLargeError as size_error:
+            return {"ok": False, "status": 413, "error": str(size_error)}
         except Exception:
             err_msg = str(e)
         return {"ok": False, "status": e.code, "error": err_msg or str(e)}
@@ -820,29 +866,40 @@ def get_logs(url, secret, level="info", search=""):
                 close_fds=True,
             )
             os.close(slave)
-            raw_output = b""
-            while True:
-                r, _, _ = select.select([master], [], [], 0.3)
-                if not r:
-                    break
-                try:
-                    chunk = os.read(master, 16384)
-                    if not chunk:
-                        break
-                    raw_output += chunk
-                except OSError:
-                    break
-            os.close(master)
-            proc.terminate()
+            raw_output = bytearray()
+            capture_deadline = time.monotonic() + MAX_LOG_CAPTURE_SECONDS
             try:
-                proc.wait(timeout=0.2)
-            except Exception:
-                pass
-            output = raw_output.decode("utf-8", errors="replace")
+                while len(raw_output) <= MAX_LOG_CAPTURE_BYTES:
+                    remaining_time = capture_deadline - time.monotonic()
+                    if remaining_time <= 0:
+                        break
+                    r, _, _ = select.select([master], [], [], min(0.3, remaining_time))
+                    if not r:
+                        break
+                    try:
+                        read_size = min(16384, MAX_LOG_CAPTURE_BYTES + 1 - len(raw_output))
+                        chunk = os.read(master, read_size)
+                        if not chunk:
+                            break
+                        raw_output.extend(chunk)
+                    except OSError:
+                        break
+            finally:
+                os.close(master)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=0.2)
+                except Exception:
+                    proc.kill()
+                    proc.wait(timeout=0.2)
+            if len(raw_output) > MAX_LOG_CAPTURE_BYTES:
+                raw_output = raw_output[:MAX_LOG_CAPTURE_BYTES]
+            output = bytes(raw_output).decode("utf-8", errors="replace")
         except Exception:
-            proc = run_sing_box_api(cmd, url=url, secret=secret, capture_output=True, text=True, timeout=3)
-            if proc.returncode == 0:
-                output = proc.stdout
+            # Do not fall back to capture_output here: the logs command is a
+            # stream, so communicate() could buffer attacker-controlled output
+            # without a byte limit if PTY capture is unavailable.
+            output = ""
 
         if output:
             entries = []
