@@ -55,6 +55,30 @@ BarWidget {
     id: persistTrafficProc
   }
 
+  Process {
+    id: initConfigProc
+    command: ["python3", root.scriptPath, "get-config"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var raw = String(text || "").trim()
+        if (!raw) return
+        try {
+          var cfg = JSON.parse(raw)
+          if (cfg.url && !root.configuredUrl) root.effectiveUrl = cfg.url
+          if (cfg.password && !root.configuredPassword) root.effectivePassword = cfg.password
+          if (cfg.showTraffic !== undefined && root.configuredShowTraffic === null) {
+            root.showTraffic = Boolean(cfg.showTraffic)
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  Component.onCompleted: {
+    initConfigProc.running = true
+  }
+
   readonly property color foreground: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property color statusColor: online ? "#4caf50" : (httpStatus === 401 ? "#ff9800" : "#f44336")

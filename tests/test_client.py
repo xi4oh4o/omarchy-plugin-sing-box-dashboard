@@ -141,5 +141,26 @@ class LimitedLogCaptureTests(unittest.TestCase):
         self.assertLessEqual(captured_bytes, 256)
 
 
+class ConfigPersistenceTests(unittest.TestCase):
+    def test_empty_env_secret_falls_back_to_config_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_config = os.path.join(temp_dir, "config.json")
+            with mock.patch.object(client, "CONFIG_FILE", temp_config), mock.patch.object(
+                client, "CONFIG_DIR", temp_dir
+            ):
+                client.save_config(url="http://127.0.0.1:9091", password="saved_secret", show_traffic=True)
+                loaded = client.load_config()
+                self.assertEqual(loaded["password"], "saved_secret")
+
+                # When BOX_API_SECRET is set to empty string, it should not wipe out the saved password
+                with mock.patch.dict(os.environ, {"BOX_API_SECRET": ""}):
+                    with mock.patch.object(client, "get_status") as mock_get_status:
+                        mock_get_status.return_value = {"online": True}
+                        with mock.patch("sys.argv", ["client.py", "status"]):
+                            with mock.patch("builtins.print"):
+                                client.main()
+                        mock_get_status.assert_called_once_with("http://127.0.0.1:9091", "saved_secret")
+
+
 if __name__ == "__main__":
     unittest.main()

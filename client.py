@@ -1084,9 +1084,9 @@ def main():
 
     url = parsed.url or env_url or cfg.get("url", "http://127.0.0.1:9091")
 
-    if parsed.password is not None:
+    if parsed.password:
         password = parsed.password
-    elif env_secret is not None:
+    elif env_secret:
         password = env_secret
     else:
         password = cfg.get("password", "")
