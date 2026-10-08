@@ -6,7 +6,7 @@
   "author": "xi4oh4o",
   "license": "MIT",
   "icon": "icon.svg",
-  "description": "sing-box status, proxy node switcher, and traffic monitor for Omarchy",
+  "description": "A native Omarchy status bar widget and full-featured control panel for sing-box (specifically optimized for sing-box 1.14+). Built following the official sing-box dashboard design language and Omarchy shell plugin standards.",
   "kinds": [
     "bar-widget"
   ],
